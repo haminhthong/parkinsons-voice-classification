@@ -1,0 +1,21 @@
+from pathlib import Path
+
+import pytest
+
+from src.data import load_data
+
+
+@pytest.fixture(scope="session")
+def data_path() -> Path:
+    return Path(__file__).parents[1] / "data" / "parkinsons.csv"
+
+
+@pytest.fixture(scope="session")
+def frame(data_path):
+    return load_data(data_path)
+
+
+@pytest.fixture(scope="session")
+def artifact_path() -> Path:
+    return Path(__file__).parents[1] / "artifacts" / "parkinsons_champion_pipeline.joblib"
+

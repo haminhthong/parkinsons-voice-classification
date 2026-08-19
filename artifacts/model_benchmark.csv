@@ -1,0 +1,7 @@
+Model,CV F1-macro mean,CV F1-macro std,CV Balanced Accuracy,CV ROC-AUC,Best parameters
+"SVM (RBF, decision score)",0.7070707070707071,0.25244948358244823,0.7333333333333333,0.6724658869395711,"{""model__C"": 1, ""model__class_weight"": null, ""model__gamma"": ""scale"", ""select__k"": 15}"
+KNN,0.6974255905525434,0.17717980282666113,0.7253333333333334,0.7272241715399611,"{""model__n_neighbors"": 3, ""model__p"": 2, ""model__weights"": ""uniform"", ""select__k"": 15}"
+Random Forest,0.6581666039274735,0.2118559322792016,0.7086666666666666,0.642411306042885,"{""model__class_weight"": null, ""model__max_depth"": 5, ""model__max_features"": ""sqrt"", ""select__k"": 15}"
+HistGradientBoosting,0.6520910928542181,0.20638515618505845,0.699111111111111,0.6754030214424951,"{""model__l2_regularization"": 0, ""model__learning_rate"": 0.1, ""model__max_leaf_nodes"": 7, ""select__k"": ""all""}"
+Logistic Regression,0.6197817663656172,0.1884690936313907,0.6835,0.6953460038986355,"{""model__C"": 0.1, ""model__class_weight"": null, ""select__k"": 10}"
+Dummy,0.42842712842712843,0.027214400856903635,0.5,0.5,{}

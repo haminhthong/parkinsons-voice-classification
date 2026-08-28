@@ -11,7 +11,7 @@ import streamlit as st
 from src.data import ORIGINAL_FEATURES
 from src.predict import load_bundle, predict_records
 
-ARTIFACT_PATH = Path("artifacts/parkinsons_champion_pipeline.joblib")
+ARTIFACT_PATH = Path("artifacts/parkinsons_calibrated_pipeline.joblib")
 
 st.set_page_config(page_title="Parkinson Voice Research Demo", page_icon="🎙️", layout="wide")
 st.title("Phân loại giọng nói Parkinson")
@@ -66,4 +66,3 @@ if uploaded_file is not None:
         file_name="parkinsons_subject_predictions.csv",
         mime="text/csv",
     )
-

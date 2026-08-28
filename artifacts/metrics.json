@@ -1,0 +1,25 @@
+{
+  "champion": "KNN + sigmoid calibration",
+  "oof_calibration": {
+    "Accuracy": 0.75,
+    "Balanced Accuracy": 0.5,
+    "Precision": 0.75,
+    "Recall/Sensitivity": 1.0,
+    "Specificity": 0.0,
+    "F1-macro": 0.42857142857142855,
+    "ROC-AUC": 0.49074074074074076,
+    "Brier score": 0.17959970888917068,
+    "ECE (5 bins)": 0.12934461815020848
+  },
+  "holdout_subject": {
+    "Accuracy": 0.75,
+    "Balanced Accuracy": 0.5,
+    "Precision": 0.75,
+    "Recall/Sensitivity": 1.0,
+    "Specificity": 0.0,
+    "F1-macro": 0.42857142857142855,
+    "ROC-AUC": 1.0,
+    "Brier score": 0.1319708751705528,
+    "ECE (5 bins)": 0.2894460753249817
+  }
+}

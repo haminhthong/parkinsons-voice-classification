@@ -77,7 +77,7 @@ def load_data(path: str | Path) -> pd.DataFrame:
 
 
 def build_subject_table(frame: pd.DataFrame) -> pd.DataFrame:
-    """Tạo bảng một dòng cho mỗi bệnh nhân để dùng khi chia fold."""
+    """Tạo bảng một dòng cho mỗi bệnh nhân để dùng khi chia tập dữ liệu."""
     return frame.groupby(SUBJECT_COLUMN, as_index=False).agg(
         status=(TARGET_COLUMN, "first"), recordings=(ID_COLUMN, "size")
     )
@@ -86,7 +86,7 @@ def build_subject_table(frame: pd.DataFrame) -> pd.DataFrame:
 def subject_holdout_split(
     frame: pd.DataFrame, *, test_size: float = 0.25, random_state: int = 42
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Chia holdout trên bảng bệnh nhân rồi ánh xạ về các bản ghi."""
+    """Chia tập kiểm tra trên bảng bệnh nhân rồi ánh xạ về các bản ghi."""
     subjects = build_subject_table(frame)
     train_subjects, test_subjects = train_test_split(
         subjects, test_size=test_size, random_state=random_state,
@@ -95,9 +95,10 @@ def subject_holdout_split(
     train_ids = set(train_subjects[SUBJECT_COLUMN])
     test_ids = set(test_subjects[SUBJECT_COLUMN])
     if not train_ids.isdisjoint(test_ids):
-        raise AssertionError("Phát hiện bệnh nhân xuất hiện ở cả train và test.")
+        raise AssertionError(
+            "Phát hiện bệnh nhân xuất hiện ở cả tập huấn luyện và tập kiểm tra."
+        )
     return (
         frame[frame[SUBJECT_COLUMN].isin(train_ids)].copy(),
         frame[frame[SUBJECT_COLUMN].isin(test_ids)].copy(),
     )
-

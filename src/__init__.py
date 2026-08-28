@@ -1,2 +1,1 @@
-"""Pipeline phan loai giong noi Parkinson co kiem soat ro ri du lieu."""
-
+"""Pipeline phân loại giọng nói Parkinson có kiểm soát rò rỉ dữ liệu."""

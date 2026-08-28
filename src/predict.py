@@ -12,15 +12,17 @@ from src.data import ID_COLUMN, ORIGINAL_FEATURES, SUBJECT_COLUMN, validate_data
 
 
 def load_bundle(path: str | Path) -> dict:
+    """Nạp gói mô hình và kiểm tra các trường metadata bắt buộc."""
     bundle = joblib.load(path)
     required = {"model", "feature_columns", "decision_threshold", "champion_name"}
     missing = required.difference(bundle)
     if missing:
-        raise ValueError(f"Artifact thiếu metadata: {sorted(missing)}")
+        raise ValueError(f"Artifact thiếu siêu dữ liệu: {sorted(missing)}")
     return bundle
 
 
 def _probability_status_1(model, features: pd.DataFrame) -> np.ndarray:
+    """Lấy xác suất của lớp dương và kiểm tra miền giá trị hợp lệ."""
     if not hasattr(model, "predict_proba"):
         raise TypeError("Mô hình triển khai phải hỗ trợ predict_proba.")
     positive_index = int(np.flatnonzero(model.classes_ == 1)[0])
@@ -33,7 +35,7 @@ def _probability_status_1(model, features: pd.DataFrame) -> np.ndarray:
 def predict_records(frame: pd.DataFrame, bundle: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Dự đoán từng bản ghi và gộp trung bình xác suất theo bệnh nhân."""
     validated = validate_dataframe(frame, require_target=False, require_name=True)
-    # Inference vẫn yêu cầu đủ 22 đặc trưng gốc để kiểm soát đúng schema nguồn.
+    # Dữ liệu suy luận vẫn phải có đủ 22 đặc trưng để giữ đúng schema nguồn.
     missing = sorted(set(ORIGINAL_FEATURES).difference(validated.columns))
     if missing:
         raise ValueError(f"Thiếu cột đặc trưng: {missing}")
@@ -52,4 +54,3 @@ def predict_records(frame: pd.DataFrame, bundle: dict) -> tuple[pd.DataFrame, pd
         subjects["probability_status_1"] >= threshold
     ).astype(int)
     return records, subjects
-

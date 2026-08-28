@@ -4,6 +4,8 @@ Dự án phân loại Parkinson từ đặc trưng giọng nói, tập trung và
 
 > Chỉ phục vụ nghiên cứu và học tập. Mô hình không phải thiết bị y tế, không dùng để chẩn đoán hoặc thay thế đánh giá của chuyên gia.
 
+[![CI](https://github.com/haminhthong/parkinsons-voice-classification/actions/workflows/ci.yml/badge.svg)](https://github.com/haminhthong/parkinsons-voice-classification/actions/workflows/ci.yml)
+
 ## Câu chuyện của dự án
 
 Phép chia ngẫu nhiên theo từng bản ghi ban đầu đạt Accuracy **97,44%**, nhưng audit cho thấy **27/27 bệnh nhân trong test cũng xuất hiện trong train** thông qua những bản ghi giọng nói khác. Vì mỗi người có nhiều lần ghi âm, mô hình có thể học dấu hiệu riêng của người đã gặp thay vì khái quát sang bệnh nhân mới.
@@ -19,6 +21,23 @@ Repository này xây dựng lại quy trình theo đúng đơn vị độc lập
 
 Kết quả benchmark hiện tại cho thấy điểm F1-macro CV dao động đáng kể giữa fold. Đây không phải điểm yếu cần che giấu: bộ dữ liệu chỉ có 32 bệnh nhân, trong đó 8 người thuộc lớp 0. Độ bất định này đáng tin cậy hơn một Accuracy rất cao sinh ra từ phép chia rò rỉ.
 
+## Kiến trúc đánh giá và triển khai
+
+```mermaid
+flowchart LR
+    A[UCI CSV] --> B[Schema + subject_id]
+    B --> C[Patient-level holdout]
+    C --> D[Subject-stratified CV]
+    D --> E[Pipeline: scale / select / model]
+    E --> F[Group-aware sigmoid calibration]
+    F --> G[Mean probability by patient]
+    G --> H[Metrics + patient bootstrap CI]
+    F --> I[Joblib artifact]
+    I --> J[Streamlit / FastAPI]
+```
+
+Không có logic preprocessing riêng trong app: notebook, CLI train, Streamlit và FastAPI đều gọi các module trong `src/`.
+
 ## Những lỗi đã sửa
 
 | Vấn đề | Cách xử lý |
@@ -29,7 +48,22 @@ Kết quả benchmark hiện tại cho thấy điểm F1-macro CV dao động đ
 | Repeated CV có fold mất lớp | Dùng cùng cơ chế subject-level split cho từng repeat |
 | Scaler học trước khi chia | Scaler là một bước trong pipeline và chỉ fit trên train fold |
 | `SVC(probability=True)` calibration theo dòng | Dùng `probability=False` và `decision_function` cho ROC–AUC benchmark |
+| Xác suất chưa calibration | Sigmoid calibration với inner folds theo bệnh nhân; đánh giá bằng outer OOF folds |
+| Chỉ có point estimate | Bootstrap cluster 2.000 lần ở mức bệnh nhân và báo cáo 95% CI |
 | Chọn mô hình theo test | Champion được chọn bằng mean CV F1-macro trên train |
+
+## Kết quả tái tạo hiện tại
+
+Champion phục vụ là **KNN + sigmoid calibration**. SVM có F1-macro CV cao nhất (`0,7071`) nhưng chỉ cung cấp decision score trong protocol benchmark; KNN là mô hình có xác suất tốt nhất theo F1-macro CV (`0,6974`) và được calibration trước khi đóng gói.
+
+| Phạm vi | F1-macro | Balanced Accuracy | ROC-AUC | Brier | ECE |
+|---|---:|---:|---:|---:|---:|
+| Train OOF theo bệnh nhân | 0,4286 | 0,5000 | 0,4907 | 0,1796 | 0,1293 |
+| Holdout 8 bệnh nhân | 0,4286 | 0,5000 | 1,0000 | 0,1320 | 0,2894 |
+
+Holdout có Recall `1,00` nhưng Specificity `0,00`: tại ngưỡng 0,5, mô hình dự đoán tất cả bệnh nhân là lớp 1. ROC-AUC `1,00` chỉ cho thấy thứ hạng xác suất trên **8 bệnh nhân** này; nó không biến classifier ở ngưỡng hiện tại thành mô hình tốt. Accuracy 95% CI theo patient bootstrap là `[0,375; 0,875]`. Đây là lý do repository công bố đầy đủ metric và giới hạn thay vì chọn một con số đẹp.
+
+Nguồn chuẩn để tái tạo bảng trên là `artifacts/metrics.json`, `artifacts/model_benchmark.csv` và `artifacts/holdout_bootstrap_ci.csv`.
 
 ## Dữ liệu và schema
 
@@ -104,11 +138,14 @@ Test bảo vệ các điều kiện quan trọng:
 .
 ├── app/                 # Streamlit và FastAPI dùng chung pipeline dự đoán
 ├── artifacts/           # Pipeline đã huấn luyện và bảng benchmark
+├── configs/             # Protocol và seed mặc định
 ├── data/                # CSV cùng mô tả nguồn/schema
 ├── notebooks/           # Notebook thí nghiệm đã làm sạch
 ├── reports/figures/     # Hình xuất từ phân tích
 ├── src/                 # Dữ liệu, đặc trưng, train, evaluate, predict
 ├── tests/               # Test schema, leakage và artifact
+├── .github/workflows/   # CI trên Python 3.11
+├── MODEL_CARD.md        # Intended use, rủi ro và quality gates
 ├── Dockerfile
 ├── requirements.txt
 └── README.md
@@ -122,5 +159,12 @@ Bootstrap phải resample theo bệnh nhân, không theo bản ghi. Khoảng tin
 
 ## Tái lập và hướng phát triển
 
-Seed mặc định là `42`; phiên bản thư viện được khóa trong `requirements.txt`; artifact lưu cả pipeline lẫn metadata đặc trưng/ngưỡng. Hướng phát triển phù hợp là kiểm định trên cohort độc lập, calibration xác suất theo group-aware folds, model card và giám sát drift. Không nên tối ưu thêm trên holdout hiện tại rồi tiếp tục gọi đó là test độc lập.
+Seed mặc định là `42`; phiên bản thư viện được khóa trong `requirements.txt`; artifact lưu cả pipeline lẫn metadata đặc trưng, ngưỡng, calibration và holdout. External validation vẫn chưa có và là bước quan trọng nhất tiếp theo. Không nên tối ưu thêm trên holdout hiện tại rồi tiếp tục gọi đó là test độc lập.
 
+## Bullet CV và câu chuyện phỏng vấn
+
+- Audit mô hình Parkinson Voice đạt Accuracy 97,44% và phát hiện 27/27 bệnh nhân test bị trùng với train qua các bản ghi khác; thiết kế lại holdout và cross-validation theo `subject_id`.
+- Benchmark 6 mô hình bằng pipeline không leakage, thêm nested group-aware probability calibration, Brier/ECE và patient-cluster bootstrap CI; bảo vệ protocol bằng 15 automated tests và GitHub Actions.
+- Đóng gói cùng một calibrated pipeline cho CLI, Streamlit, FastAPI và Docker, kèm model card nêu rõ intended use, external-validation gap và giới hạn fairness.
+
+Câu chuyện ngắn: **điểm cao bất thường → audit đơn vị độc lập → phát hiện leakage → thiết kế lại protocol → hiệu năng giảm nhưng đáng tin hơn → đóng gói quality gates để lỗi không quay lại.**

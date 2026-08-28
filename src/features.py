@@ -14,7 +14,7 @@ MODEL_FEATURES = [column for column in ORIGINAL_FEATURES if column not in REDUND
 
 
 def make_pipeline(model: BaseEstimator, *, scale: bool = True) -> Pipeline:
-    """Đặt scaler và chọn đặc trưng trong pipeline để chỉ fit trên train fold."""
+    """Đặt chuẩn hóa và chọn đặc trưng trong pipeline của từng fold huấn luyện."""
     return Pipeline(
         [
             ("scale", StandardScaler() if scale else "passthrough"),
@@ -22,4 +22,3 @@ def make_pipeline(model: BaseEstimator, *, scale: bool = True) -> Pipeline:
             ("model", model),
         ]
     )
-

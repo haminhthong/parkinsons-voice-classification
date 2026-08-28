@@ -11,7 +11,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from src.predict import load_bundle, predict_records
 
 app = FastAPI(title="Parkinson Voice Research API", version="1.0.0")
-ARTIFACT_PATH = Path("artifacts/parkinsons_champion_pipeline.joblib")
+ARTIFACT_PATH = Path("artifacts/parkinsons_calibrated_pipeline.joblib")
 
 
 @app.get("/health")
@@ -33,4 +33,3 @@ async def predict(file: UploadFile = File(...)) -> dict:
         "records": records.to_dict(orient="records"),
         "subjects": subjects.to_dict(orient="records"),
     }
-

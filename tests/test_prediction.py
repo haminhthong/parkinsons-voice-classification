@@ -23,3 +23,9 @@ def test_probabilities_are_between_zero_and_one(frame, artifact_path):
     assert records["probability_status_1"].between(0, 1).all()
     assert subjects["probability_status_1"].between(0, 1).all()
 
+
+def test_artifact_records_group_aware_calibration(artifact_path):
+    bundle = load_bundle(artifact_path)
+    assert bundle["calibration"] == "sigmoid with subject-level folds"
+    assert 0 <= bundle["oof_calibration_metrics"]["Brier score"] <= 1
+    assert 0 <= bundle["oof_calibration_metrics"]["ECE (5 bins)"] <= 1

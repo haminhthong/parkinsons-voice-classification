@@ -33,7 +33,7 @@ def _probability_status_1(model, features: pd.DataFrame) -> np.ndarray:
 
 
 def predict_records(frame: pd.DataFrame, bundle: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Dự đoán từng bản ghi và gộp trung bình xác suất theo bệnh nhân."""
+    """Dự đoán từng bản ghi rồi áp dụng quy tắc tổng hợp theo bệnh nhân."""
     validated = validate_dataframe(frame, require_target=False, require_name=True)
     # Dữ liệu suy luận vẫn phải có đủ 22 đặc trưng để giữ đúng schema nguồn.
     missing = sorted(set(ORIGINAL_FEATURES).difference(validated.columns))
@@ -45,9 +45,19 @@ def predict_records(frame: pd.DataFrame, bundle: dict) -> tuple[pd.DataFrame, pd
     records = validated[[ID_COLUMN, SUBJECT_COLUMN]].copy()
     records["probability_status_1"] = probabilities
     records["predicted_status"] = (probabilities >= threshold).astype(int)
+    aggregation = bundle.get("probability_aggregation", "mean")
+    # Tương thích với artifact được tạo trước khi chuẩn hóa tên cách gộp.
+    if aggregation == "mean_by_subject":
+        aggregation = "mean"
+    aggregation_functions = {"mean": "mean", "median": "median", "max": "max"}
+    if aggregation not in aggregation_functions:
+        raise ValueError(f"Artifact chứa cách gộp xác suất không hợp lệ: {aggregation!r}")
     subjects = records.groupby(SUBJECT_COLUMN, as_index=False).agg(
         n_recordings=(ID_COLUMN, "size"),
-        probability_status_1=("probability_status_1", "mean"),
+        probability_status_1=(
+            "probability_status_1",
+            aggregation_functions[aggregation],
+        ),
         positive_record_predictions=("predicted_status", "sum"),
     )
     subjects["predicted_status"] = (

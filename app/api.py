@@ -25,11 +25,15 @@ async def predict(file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=400, detail="Chỉ chấp nhận tệp CSV.")
     try:
         frame = pd.read_csv(io.BytesIO(await file.read()))
-        records, subjects = predict_records(frame, load_bundle(ARTIFACT_PATH))
+        bundle = load_bundle(ARTIFACT_PATH)
+        records, subjects = predict_records(frame, bundle)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "warning": "Chỉ phục vụ nghiên cứu, không dùng để chẩn đoán.",
+        "model": bundle["champion_name"],
+        "probability_aggregation": bundle.get("probability_aggregation", "mean"),
+        "decision_threshold": float(bundle["decision_threshold"]),
         "records": records.to_dict(orient="records"),
         "subjects": subjects.to_dict(orient="records"),
     }

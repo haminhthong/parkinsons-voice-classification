@@ -29,3 +29,9 @@ def test_artifact_records_group_aware_calibration(artifact_path):
     assert bundle["calibration"] == "sigmoid with subject-level folds"
     assert 0 <= bundle["oof_calibration_metrics"]["Brier score"] <= 1
     assert 0 <= bundle["oof_calibration_metrics"]["ECE (5 bins)"] <= 1
+
+
+def test_artifact_records_oof_selected_patient_rule(artifact_path):
+    bundle = load_bundle(artifact_path)
+    assert bundle["probability_aggregation"] in {"mean", "median", "max"}
+    assert 0 < bundle["decision_threshold"] < 1

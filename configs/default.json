@@ -3,7 +3,7 @@
   "test_size": 0.25,
   "benchmark_splits": 5,
   "calibration_splits": 3,
-  "decision_threshold": 0.5,
-  "subject_probability_aggregation": "mean",
+  "minimum_specificity": 0.5,
+  "aggregation_candidates": ["mean", "median", "max"],
   "selection_metric": "CV F1-macro"
 }

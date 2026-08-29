@@ -5,8 +5,14 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
-    accuracy_score, balanced_accuracy_score, confusion_matrix, f1_score,
-    brier_score_loss, precision_score, recall_score, roc_auc_score,
+    accuracy_score,
+    balanced_accuracy_score,
+    brier_score_loss,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
 )
 from sklearn.model_selection import StratifiedKFold
 
@@ -77,9 +83,23 @@ def calculate_metrics(y_true, y_pred, y_score) -> dict[str, float]:
 
 
 def aggregate_subject_predictions(
-    frame: pd.DataFrame, probabilities: np.ndarray, *, threshold: float = 0.5
+    frame: pd.DataFrame,
+    probabilities: np.ndarray,
+    *,
+    threshold: float = 0.5,
+    aggregation: str = "mean",
 ) -> pd.DataFrame:
-    """Gộp xác suất bản ghi bằng trung bình trong từng bệnh nhân."""
+    """Gộp xác suất bản ghi theo bệnh nhân bằng một quy tắc xác định trước."""
+    aggregation_functions = {
+        "mean": "mean",
+        "median": "median",
+        "max": "max",
+    }
+    if aggregation not in aggregation_functions:
+        raise ValueError(
+            f"Cách gộp {aggregation!r} không hợp lệ; "
+            f"chọn một trong {sorted(aggregation_functions)}."
+        )
     records = pd.DataFrame(
         {
             SUBJECT_COLUMN: frame[SUBJECT_COLUMN].to_numpy(),
@@ -89,11 +109,44 @@ def aggregate_subject_predictions(
     )
     subjects = records.groupby(SUBJECT_COLUMN, as_index=False).agg(
         status=(TARGET_COLUMN, "first"),
-        probability=("probability", "mean"),
+        probability=("probability", aggregation_functions[aggregation]),
         recordings=("probability", "size"),
     )
     subjects["prediction"] = (subjects["probability"] >= threshold).astype(int)
     return subjects
+
+
+def select_decision_threshold(
+    subjects: pd.DataFrame,
+    *,
+    minimum_specificity: float = 0.5,
+) -> tuple[float, pd.DataFrame]:
+    """Chọn ngưỡng từ OOF train theo Balanced Accuracy và ràng buộc specificity."""
+    probabilities = subjects["probability"].to_numpy(dtype=float)
+    candidates = np.unique(
+        np.concatenate(
+            [
+                np.linspace(0.05, 0.95, 181),
+                probabilities,
+            ]
+        )
+    )
+    rows = []
+    for threshold in candidates:
+        prediction = (probabilities >= threshold).astype(int)
+        metrics = calculate_metrics(subjects["status"], prediction, probabilities)
+        rows.append({"Threshold": float(threshold), **metrics})
+    table = pd.DataFrame(rows)
+    eligible = table[table["Specificity"] >= minimum_specificity]
+    if eligible.empty:
+        eligible = table
+    ranked = eligible.assign(
+        distance_from_default=(eligible["Threshold"] - 0.5).abs()
+    ).sort_values(
+        ["Balanced Accuracy", "F1-macro", "Specificity", "distance_from_default"],
+        ascending=[False, False, False, True],
+    )
+    return float(ranked.iloc[0]["Threshold"]), table
 
 
 def expected_calibration_error(y_true, probabilities, *, n_bins: int = 5) -> float:

@@ -22,4 +22,5 @@ def test_predict_endpoint_accepts_csv(data_path):
     assert len(payload["records"]) == 195
     assert len(payload["subjects"]) == 32
     assert "không dùng để chẩn đoán" in payload["warning"]
-
+    assert payload["probability_aggregation"] in {"mean", "median", "max"}
+    assert 0 < payload["decision_threshold"] < 1

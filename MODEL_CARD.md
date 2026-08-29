@@ -15,11 +15,11 @@ Mô hình không được thiết kế để chẩn đoán, sàng lọc, điều
 
 ## Mô hình và xác suất
 
-Champion deployable được chọn bằng F1-macro CV trên train trong các mô hình hỗ trợ xác suất. Mô hình được calibration bằng sigmoid; cả outer OOF evaluation và inner calibration folds đều không trùng bệnh nhân. Xác suất bệnh nhân là trung bình xác suất các bản ghi, với ngưỡng 0,5 cố định trước khi xem test.
+Champion deployable được chọn bằng F1-macro CV trên train trong các mô hình hỗ trợ xác suất. Mô hình được calibration bằng sigmoid; cả outer OOF evaluation và inner calibration folds đều không trùng bệnh nhân. Cách gộp xác suất và threshold cũng được chọn hoàn toàn từ OOF train, không dùng holdout.
 
 Metric tái tạo được nằm trong `artifacts/metrics.json`; confidence interval nằm trong `artifacts/holdout_bootstrap_ci.csv`.
 
-Ở artifact hiện tại, threshold 0,5 cho Recall 1,00 nhưng Specificity 0,00 trên holdout. ROC-AUC 1,00 chỉ phản ánh thứ hạng trên 8 bệnh nhân test và không bù được lỗi phân loại lớp âm tại ngưỡng triển khai. Không nên điều chỉnh threshold trên chính holdout này rồi tiếp tục xem nó là test độc lập.
+Artifact hiện tại dùng xác suất lớn nhất (`max`) trong các bản ghi của bệnh nhân và threshold `0,835`. Trên holdout, Recall là `1,00`, Specificity `0,50` và Balanced Accuracy `0,75`. Các con số này chỉ dựa trên 8 bệnh nhân test; không nên tiếp tục điều chỉnh quy tắc dựa trên holdout rồi vẫn xem nó là kiểm tra độc lập.
 
 ## Giới hạn và rủi ro
 

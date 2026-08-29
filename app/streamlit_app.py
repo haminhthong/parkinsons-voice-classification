@@ -18,7 +18,8 @@ st.title("Phân loại giọng nói Parkinson")
 st.warning("Chỉ phục vụ nghiên cứu, không dùng để chẩn đoán hoặc thay thế tư vấn y khoa.")
 st.write(
     "Tải lên CSV gồm cột `name` và 22 đặc trưng giọng nói. "
-    "Ứng dụng dự đoán từng bản ghi, sau đó lấy trung bình xác suất theo bệnh nhân."
+    "Ứng dụng dự đoán từng bản ghi, sau đó gộp xác suất theo quy tắc "
+    "đã được khóa từ OOF train."
 )
 
 with st.expander("Schema CSV bắt buộc"):
@@ -37,6 +38,11 @@ if uploaded_file is not None:
     st.success(
         f"Đã xử lý {len(record_results)} bản ghi của "
         f"{len(subject_results)} bệnh nhân bằng {bundle['champion_name']}."
+    )
+    st.caption(
+        "Quy tắc tổng hợp được khóa từ OOF train: "
+        f"gộp `{bundle.get('probability_aggregation', 'mean')}`, "
+        f"ngưỡng `{float(bundle['decision_threshold']):.3f}`."
     )
     st.subheader("Kết quả tổng hợp theo bệnh nhân")
     st.dataframe(

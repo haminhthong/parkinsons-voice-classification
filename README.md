@@ -58,10 +58,10 @@ Champion phục vụ là **KNN + sigmoid calibration**. SVM có F1-macro CV cao 
 
 | Phạm vi | F1-macro | Balanced Accuracy | ROC-AUC | Brier | ECE |
 |---|---:|---:|---:|---:|---:|
-| Train OOF theo bệnh nhân | 0,4286 | 0,5000 | 0,4907 | 0,1796 | 0,1293 |
-| Holdout 8 bệnh nhân | 0,4286 | 0,5000 | 1,0000 | 0,1320 | 0,2894 |
+| Train OOF theo bệnh nhân | 0,3651 | 0,5833 | 0,5602 | 0,1796 | 0,1212 |
+| Holdout 8 bệnh nhân | 0,7949 | 0,7500 | 0,7500 | 0,1861 | 0,1180 |
 
-Holdout có Recall `1,00` nhưng Specificity `0,00`: tại ngưỡng 0,5, mô hình dự đoán tất cả bệnh nhân là lớp 1. ROC-AUC `1,00` chỉ cho thấy thứ hạng xác suất trên **8 bệnh nhân** này; nó không biến classifier ở ngưỡng hiện tại thành mô hình tốt. Accuracy 95% CI theo patient bootstrap là `[0,375; 0,875]`. Đây là lý do repository công bố đầy đủ metric và giới hạn thay vì chọn một con số đẹp.
+Quy tắc triển khai được chọn hoàn toàn từ OOF train: lấy xác suất lớn nhất (`max`) trong các bản ghi của bệnh nhân và dùng threshold `0,835`. Trên holdout, Recall đạt `1,00` và Specificity tăng lên `0,50`. Accuracy 95% CI theo patient bootstrap vẫn rất rộng: `[0,625; 1,000]`. Vì holdout chỉ có **8 bệnh nhân**, đây chưa phải bằng chứng về khả năng tổng quát hóa lâm sàng.
 
 Nguồn chuẩn để tái tạo bảng trên là `artifacts/metrics.json`, `artifacts/model_benchmark.csv` và `artifacts/holdout_bootstrap_ci.csv`.
 
@@ -77,7 +77,7 @@ Luồng xử lý:
 
 ```text
 Upload CSV → kiểm tra schema → pipeline tiền xử lý → dự đoán từng bản ghi
-           → trung bình xác suất theo bệnh nhân → bảng + biểu đồ + tải CSV
+           → gộp xác suất theo quy tắc OOF → bảng + biểu đồ + tải CSV
 ```
 
 Giao diện Streamlit hiển thị:
@@ -153,7 +153,7 @@ Test bảo vệ các điều kiện quan trọng:
 
 ## Diễn giải kết quả đúng cách
 
-Accuracy không đủ cho dữ liệu lệch lớp. Benchmark báo cáo F1-macro, Balanced Accuracy và ROC–AUC; phân tích cuối cần xem thêm Recall/Sensitivity và Specificity. Xác suất bệnh nhân là trung bình xác suất của các bản ghi thuộc cùng `subject_id`, với ngưỡng cố định 0,5.
+Accuracy không đủ cho dữ liệu lệch lớp. Benchmark báo cáo F1-macro, Balanced Accuracy và ROC–AUC; phân tích cuối cần xem thêm Recall/Sensitivity và Specificity. Cách gộp xác suất và threshold được chọn trên OOF train, sau đó khóa trước khi đánh giá holdout.
 
 Bootstrap phải resample theo bệnh nhân, không theo bản ghi. Khoảng tin cậy có thể rộng vì holdout chỉ có hai bệnh nhân lớp 0. Kết quả không chứng minh quan hệ nhân quả giữa đặc trưng giọng nói và bệnh, cũng không thay thế validation trên cohort độc lập.
 
@@ -164,7 +164,7 @@ Seed mặc định là `42`; phiên bản thư viện được khóa trong `requ
 ## Bullet CV và câu chuyện phỏng vấn
 
 - Audit mô hình Parkinson Voice đạt Accuracy 97,44% và phát hiện 27/27 bệnh nhân test bị trùng với train qua các bản ghi khác; thiết kế lại holdout và cross-validation theo `subject_id`.
-- Benchmark 6 mô hình bằng pipeline không leakage, thêm nested group-aware probability calibration, Brier/ECE và patient-cluster bootstrap CI; bảo vệ protocol bằng 15 automated tests và GitHub Actions.
+- Benchmark 6 mô hình bằng pipeline không leakage, thêm nested group-aware probability calibration, OOF threshold/aggregation selection, Brier/ECE và patient-cluster bootstrap CI; bảo vệ protocol bằng 18 automated tests và GitHub Actions.
 - Đóng gói cùng một calibrated pipeline cho CLI, Streamlit, FastAPI và Docker, kèm model card nêu rõ intended use, external-validation gap và giới hạn fairness.
 
 Câu chuyện ngắn: **điểm cao bất thường → audit đơn vị độc lập → phát hiện leakage → thiết kế lại protocol → hiệu năng giảm nhưng đáng tin hơn → đóng gói quality gates để lỗi không quay lại.**

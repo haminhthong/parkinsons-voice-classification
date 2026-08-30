@@ -1,4 +1,3 @@
-import pandas as pd
 import pytest
 
 from src.data import ORIGINAL_FEATURES, TARGET_COLUMN, validate_dataframe
@@ -24,4 +23,3 @@ def test_non_binary_status_is_rejected(frame):
     invalid.loc[invalid.index[0], TARGET_COLUMN] = 2
     with pytest.raises(ValueError, match="0 và 1"):
         validate_dataframe(invalid)
-

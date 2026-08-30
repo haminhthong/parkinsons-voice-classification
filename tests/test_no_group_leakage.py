@@ -1,9 +1,9 @@
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
 from src.data import SUBJECT_COLUMN, subject_holdout_split
 from src.evaluate import make_subject_folds
 from src.features import make_pipeline
-from sklearn.linear_model import LogisticRegression
 
 
 def test_subject_never_appears_in_both_train_and_test(frame):
@@ -23,4 +23,3 @@ def test_scaler_is_only_a_pipeline_step():
     pipeline = make_pipeline(LogisticRegression())
     assert isinstance(pipeline.named_steps["scale"], StandardScaler)
     assert not hasattr(pipeline.named_steps["scale"], "mean_")
-

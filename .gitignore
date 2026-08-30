@@ -169,6 +169,9 @@ cython_debug/
 
 # Ruff stuff:
 .ruff_cache/
+.mplconfig/
+reports/.pytest-cache/
+reports/.pytest-tmp/
 
 # PyPI configuration file
 .pypirc

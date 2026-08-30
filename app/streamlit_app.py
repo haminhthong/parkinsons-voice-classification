@@ -1,4 +1,9 @@
-"""Ứng dụng Streamlit dự đoán CSV theo bệnh nhân."""
+"""Giao diện Web ứng dụng Streamlit cho Phân loại Giọng nói Parkinson.
+
+Cho phép bác sĩ/nghiên cứu viên tải lên tệp CSV chứa 22 đặc trưng âm thanh,
+hiển thị bảng kết quả dự đoán ở cấp độ bản ghi và cấp độ bệnh nhân, biểu đồ xác suất
+và cho phép xuất tệp kết quả dự đoán dạng CSV.
+"""
 
 from __future__ import annotations
 
@@ -11,64 +16,80 @@ import streamlit as st
 from src.data import ORIGINAL_FEATURES
 from src.predict import load_bundle, predict_records
 
+# Thư mục chứa mô hình artifact
 ARTIFACT_PATH = Path("artifacts/parkinsons_calibrated_pipeline.joblib")
 
-st.set_page_config(page_title="Parkinson Voice Research Demo", page_icon="🎙️", layout="wide")
-st.title("Phân loại giọng nói Parkinson")
-st.warning("Chỉ phục vụ nghiên cứu, không dùng để chẩn đoán hoặc thay thế tư vấn y khoa.")
-st.write(
-    "Tải lên CSV gồm cột `name` và 22 đặc trưng giọng nói. "
-    "Ứng dụng dự đoán từng bản ghi, sau đó gộp xác suất theo quy tắc "
-    "đã được khóa từ OOF train."
+# Cấu hình giao diện trang web Streamlit
+st.set_page_config(
+    page_title="Parkinson Voice Research Demo",
+    page_icon="🎙️",
+    layout="wide",
 )
 
-with st.expander("Schema CSV bắt buộc"):
+st.title("🎙️ Phân loại Giọng nói Parkinson (Leakage-Aware)")
+st.warning(
+    "⚠️ Dự án chỉ phục vụ mục đích nghiên cứu và học tập. "
+    "Mô hình không phải thiết bị y tế và không thay thế chẩn đoán chuyên khoa."
+)
+
+st.markdown(
+    "Tải lên tệp CSV chứa cột `name` và 22 đặc trưng tần số/biên độ giọng nói từ bộ dữ liệu UCI. "
+    "Mô hình thực hiện dự đoán từng bản ghi âm, sau đó **gộp xác suất theo cấp độ bệnh nhân** "
+    "dựa trên quy tắc đã được tối ưu hóa hoàn toàn từ Out-Of-Fold (OOF) Train."
+)
+
+
+with st.expander("📋 Xem Schema tệp CSV bắt buộc"):
     st.code("name, " + ", ".join(ORIGINAL_FEATURES), language=None)
 
-uploaded_file = st.file_uploader("Chọn tệp CSV", type=["csv"])
+uploaded_file = st.file_uploader("Tải lên tệp CSV dữ liệu giọng nói", type=["csv"])
+
 if uploaded_file is not None:
     try:
         input_frame = pd.read_csv(uploaded_file)
         bundle = load_bundle(ARTIFACT_PATH)
         record_results, subject_results = predict_records(input_frame, bundle)
-    except Exception as exc:  # Streamlit cần chuyển lỗi schema thành thông báo dễ hiểu.
-        st.error(f"Không thể xử lý tệp: {exc}")
+    except Exception as exc:
+        st.error(f"❌ Không thể xử lý tệp: {exc}")
         st.stop()
 
     st.success(
-        f"Đã xử lý {len(record_results)} bản ghi của "
-        f"{len(subject_results)} bệnh nhân bằng {bundle['champion_name']}."
+        f"✅ Đã xử lý thành công {len(record_results)} bản ghi âm của "
+        f"{len(subject_results)} bệnh nhân bằng mô hình **{bundle['champion_name']}**."
     )
     st.caption(
-        "Quy tắc tổng hợp được khóa từ OOF train: "
-        f"gộp `{bundle.get('probability_aggregation', 'mean')}`, "
-        f"ngưỡng `{float(bundle['decision_threshold']):.3f}`."
+        " Quy tắc gộp xác suất được khóa từ OOF Train: "
+        f"Phương pháp gộp `{bundle.get('probability_aggregation', 'mean')}`, "
+        f"Ngưỡng phân loại `{float(bundle['decision_threshold']):.3f}`."
     )
-    st.subheader("Kết quả tổng hợp theo bệnh nhân")
+
+    st.subheader("📊 Kết quả tổng hợp theo Bệnh nhân (Subject-Level)")
     st.dataframe(
         subject_results.style.format({"probability_status_1": "{:.1%}"}),
         use_container_width=True,
     )
 
     chart_frame = subject_results.set_index("subject_id")[["probability_status_1"]]
-    st.bar_chart(chart_frame, y_label="Xác suất status = 1", horizontal=False)
+    st.bar_chart(chart_frame, y_label="Xác suất mắc bệnh (status = 1)", horizontal=False)
 
-    st.subheader("Kết quả từng bản ghi")
+    st.subheader("📝 Kết quả chi tiết từng Bản ghi âm (Record-Level)")
     st.dataframe(
         record_results.style.format({"probability_status_1": "{:.1%}"}),
         use_container_width=True,
     )
 
-    st.subheader("Biểu đồ đặc trưng")
-    feature = st.selectbox("Chọn đặc trưng", bundle["feature_columns"])
+    st.subheader("📈 Trực quan hóa Đặc trưng Giọng nói")
+    feature = st.selectbox("Chọn đặc trưng phân tích", bundle["feature_columns"])
     feature_chart = input_frame.assign(subject_id=record_results["subject_id"])
     st.bar_chart(feature_chart, x="subject_id", y=feature, y_label=feature)
 
+    # Nút tải xuống kết quả CSV
     output = io.StringIO()
     subject_results.to_csv(output, index=False)
     st.download_button(
-        "Tải kết quả dự đoán",
+        "📥 Tải tệp kết quả dự đoán CSV",
         data=output.getvalue().encode("utf-8-sig"),
         file_name="parkinsons_subject_predictions.csv",
         mime="text/csv",
     )
+

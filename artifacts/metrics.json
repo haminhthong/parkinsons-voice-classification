@@ -1,5 +1,7 @@
 {
   "champion": "KNN + sigmoid calibration",
+  "probability_aggregation": "max",
+  "decision_threshold": 0.835,
   "oof_calibration": {
     "Accuracy": 0.375,
     "Balanced Accuracy": 0.5833333333333334,
@@ -21,7 +23,5 @@
     "ROC-AUC": 0.75,
     "Brier score": 0.1861015105822889,
     "ECE (5 bins)": 0.11798540697532027
-  },
-  "probability_aggregation": "max",
-  "decision_threshold": 0.835
+  }
 }

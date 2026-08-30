@@ -2,8 +2,12 @@ import numpy as np
 import pandas as pd
 
 from src.data import subject_holdout_split
-from src.evaluate import bootstrap_subject_confidence_intervals, expected_calibration_error
-from src.evaluate import aggregate_subject_predictions, select_decision_threshold
+from src.evaluate import (
+    aggregate_subject_predictions,
+    bootstrap_subject_confidence_intervals,
+    expected_calibration_error,
+    select_decision_threshold,
+)
 
 
 def test_expected_calibration_error_is_bounded():
@@ -18,7 +22,7 @@ def test_bootstrap_confidence_intervals_are_valid(frame):
     subjects["prediction"] = (subjects["probability"] >= 0.5).astype(int)
     intervals = bootstrap_subject_confidence_intervals(subjects, n_bootstrap=100)
     assert intervals["Valid bootstrap samples"].min() > 0
-    assert (intervals["CI 2.5%"] <= intervals["CI 97.5%"] ).all()
+    assert (intervals["CI 2.5%"] <= intervals["CI 97.5%"]).all()
 
 
 def test_patient_probability_aggregation_supports_expected_methods(frame):

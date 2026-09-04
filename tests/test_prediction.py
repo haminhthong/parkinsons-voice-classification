@@ -35,3 +35,20 @@ def test_artifact_records_oof_selected_patient_rule(artifact_path):
     bundle = load_bundle(artifact_path)
     assert bundle["probability_aggregation"] in {"mean", "median", "max"}
     assert 0 < bundle["decision_threshold"] < 1
+
+
+def test_artifact_contains_environment_metadata(artifact_path):
+    bundle = joblib.load(artifact_path)
+
+    required = {
+        "artifact_version",
+        "schema_version",
+        "python_version",
+        "sklearn_version",
+        "data_sha256",
+        "feature_columns",
+        "decision_threshold",
+        "probability_aggregation",
+    }
+
+    assert required.issubset(bundle)

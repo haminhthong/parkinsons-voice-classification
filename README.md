@@ -1,10 +1,10 @@
 # 🎙️ Leakage-Aware Parkinson’s Voice Classification
 
-> **Dự án Machine Learning Y tế:** Phân loại bệnh Parkinson qua phân tích đặc trưng giọng nói, tập trung giải quyết bài toán cốt lõi trong Y tế & AI: **Kiểm toán Rò rỉ Dữ liệu theo Bệnh nhân (Patient-Level Data Leakage Audit)** và **Đánh giá Khả năng Khái quát hóa Lâm sàng trên Bệnh nhân Mới**.
+> **Research prototype:** Phân loại `status` từ các đặc trưng âm học đã trích xuất, tập trung vào kiểm toán rò rỉ dữ liệu và đánh giá trên bệnh nhân chưa xuất hiện trong train.
 
 [![CI](https://github.com/haminhthong/parkinsons-voice-classification/actions/workflows/ci.yml/badge.svg)](https://github.com/haminhthong/parkinsons-voice-classification/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![scikit-learn](https://img.shields.io/badge/scikit--learn-1.9%2B-orange.svg)](https://scikit-learn.org/)
+[![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
+[![scikit-learn](https://img.shields.io/badge/scikit--learn-1.5.2-orange.svg)](https://scikit-learn.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-green.svg)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.25%2B-red.svg)](https://streamlit.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
@@ -13,23 +13,25 @@
 
 ## 🎯 Điểm Nổi Bật Dành Cho CV / Portfolio
 
-- **Patient-Level Independent Evaluation**: Phân chia Holdout và Cross-Validation độc lập 100% theo bệnh nhân (`subject_id`), ngăn chặn triệt để hiện tượng 27/27 bệnh nhân tập test bị trùng lặp ở tập train.
-- **Nested Group-Aware Sigmoid Calibration**: Hiệu chỉnh xác suất đầu ra bằng `CalibratedClassifierCV` trên các fold không trùng bệnh nhân, đưa Brier Score & ECE về mức tối ưu.
+> **Phạm vi đầu vào:** Ứng dụng không nhận WAV/MP3 và không tự trích xuất tín hiệu âm thanh. Input là CSV chứa `name` cùng 22 đặc trưng âm học theo schema UCI Parkinsons.
+
+- **Patient-Level Independent Evaluation**: Phân chia holdout, outer CV và inner CV theo bệnh nhân (`subject_id`), kèm assertion kiểm tra overlap.
+- **Nested Group-Aware Sigmoid Calibration**: Hiệu chỉnh xác suất bằng `CalibratedClassifierCV` trên các fold không trùng bệnh nhân; chất lượng xác suất được mô tả bằng Brier Score và ECE.
 - **Zero-Leakage OOF Rule Optimization**: Khóa toàn bộ quy tắc gộp xác suất bản ghi (`max`/`mean`/`median`) và ngưỡng quyết định (`decision_threshold`) hoàn toàn từ Out-Of-Fold (OOF) Train.
 - **Statistical Uncertainty Estimation**: Sử dụng thuật toán **Patient Cluster Bootstrap 2,000 lần** để tính Khoảng Tin Cậy 95% (95% CI) cho tất cả các chỉ số hiệu năng.
-- **Production-Ready Architecture**: Đóng gói thành trọn bộ giải pháp gồm **CLI Training Pipeline**, **FastAPI REST API**, **Streamlit Web Demo**, **Docker Container** và **GitHub Actions CI/CD**.
+- **Deployment-Oriented Prototype**: Có CLI training, FastAPI, Streamlit, Docker và GitHub Actions; chưa được xác nhận cho triển khai lâm sàng hoặc production có dữ liệu thật.
 
 ---
 
 ## 📖 Câu Chuyện Dự Án & Vấn Đề Rò Rỉ Dữ Liệu (Data Leakage)
 
-### 🔴 Phương Pháp Ngây Thơ (Naive Split): Accuracy "Ảo" 97.44%
+### 🔴 Phương Pháp Ngây Thơ (Naive Split): Accuracy lạc quan 92.31%
 Trong hầu hết các bài báo và notebook minh họa trên bộ dữ liệu [UCI Parkinsons](https://archive.ics.uci.edu/dataset/174/parkinsons), dữ liệu gồm 195 bản ghi âm từ 32 bệnh nhân (mỗi bệnh nhân thực hiện 5-6 lần ghi âm giọng nói). 
 
 Khi sử dụng hàm `train_test_split` ngẫu nhiên mặc định trên từng dòng ghi âm:
-1. Mô hình đạt Accuracy cực kỳ ấn tượng: **97.44%**.
-2. Tuy nhiên, kiểm toán dữ liệu (Data Audit) phát hiện **27/27 bệnh nhân (100%) trong tập Test đã xuất hiện ở tập Train** thông qua các bản ghi âm khác của chính họ.
-3. **Hậu quả:** Mô hình không học đặc trưng tần số giọng nói đặc trưng cho bệnh Parkinson, mà thực chất đang "học thuộc lòng" tông giọng cá nhân của từng bệnh nhân. Khi đưa vào môi trường lâm sàng thực tế gặp bệnh nhân mới, mô hình hoàn toàn thất bại.
+1. Với Random Forest, `test_size=0.2` và `random_state=42`, mô hình đạt Accuracy **92.31%**.
+2. Audit tái lập trong `src/audit.py` phát hiện **24/24 bệnh nhân (100%) trong test cũng xuất hiện trong train** qua các bản ghi khác.
+3. **Hậu quả:** Kết quả record-level split không cung cấp ước lượng đáng tin cậy cho bệnh nhân mới, vì mô hình có thể khai thác đặc điểm riêng của người nói. Thí nghiệm này không chứng minh trực tiếp mô hình đã học danh tính hoặc chắc chắn thất bại trên mọi cohort khác.
 
 ### 🟢 Phương Pháp Chống Rò Rỉ (Leakage-Aware Pipeline)
 Repository này tái cấu trúc lại toàn bộ quy trình xử lý và đánh giá:
@@ -69,37 +71,39 @@ flowchart TD
 
 ---
 
-## 📊 Kết Quả Tái Tạo & Benchmark
+<!-- GENERATED_RESULTS_START -->
 
-### 1. Benchmark Các Mô Hình Ứng Viên (Cross-Validation theo Bệnh Nhân)
+### Bảng So Sánh Benchmark Mô Hình (Subject-Level Cross-Validation)
 
-Champion triển khai được chọn là **KNN + Sigmoid Calibration** (mô hình tối ưu nhất hỗ trợ tính xác suất đầu ra và hiệu chỉnh lồng nhóm).
+| Model | Subject F1-macro mean | Subject F1-macro std | Subject Balanced Accuracy mean | Subject ROC-AUC mean |
+| :--- | :---: | :---: | :---: | :---: |
+| KNN | 0.7270 | 0.2527 | 0.7500 | 0.9000 |
+| SVM (RBF, decision score) | 0.7270 | 0.2527 | 0.7500 | 0.6833 |
+| Random Forest | 0.7270 | 0.2527 | 0.7500 | 0.6000 |
+| HistGradientBoosting | 0.7270 | 0.2527 | 0.7500 | 0.5000 |
+| Logistic Regression | 0.6794 | 0.2166 | 0.7250 | 0.7000 |
+| Dummy | 0.4274 | 0.0269 | 0.5000 | 0.4750 |
 
-| Mô Hình | F1-macro CV (Mean ± Std) | Balanced Accuracy CV | ROC-AUC CV | Ghi Chú |
-|---|:---:|:---:|:---:|---|
-| **SVM (RBF)** | 0.7071 ± 0.1704 | 0.7250 | 0.7625 | Benchmark bằng decision score |
-| **KNN (Champion)** | **0.6974 ± 0.1582** | **0.7083** | **0.7500** | **Được chọn triển khai + Calibration** |
-| **HistGradientBoosting** | 0.6558 ± 0.1705 | 0.6750 | 0.7500 | Gradient Boosting trên mẫu nhỏ |
-| **Logistic Regression** | 0.6548 ± 0.1171 | 0.6833 | 0.7625 | Mô hình tuyến tính baseline |
-| **Random Forest** | 0.6405 ± 0.1121 | 0.6667 | 0.7375 | Ensembled Decision Trees |
-| **Dummy Classifier** | 0.4497 ± 0.0526 | 0.5000 | 0.5000 | Baseline ngẫu nhiên |
+### Kết Quả Đánh Giá Tổng Thể Pipeline
 
-### 2. Kết Quả Dự Đoán & Khoảng Tin Cậy 95% CI Trên Tập Holdout Test (8 Bệnh Nhân)
+- **Mô hình Champion**: `KNN + sigmoid calibration`
+- **Quy tắc gộp xác suất**: `median`
+- **Ngưỡng quyết định**: `0.7500`
 
-Toàn bộ quy tắc gộp xác suất (`max`) và ngưỡng phân loại (`0.835`) được **khóa hoàn toàn từ OOF Train**.
+#### Nested Subject-Level Cross-Validation:
+- **Subject F1-macro mean**: `0.5190` (std: `0.3283`)
+- **Subject Balanced Accuracy mean**: `0.6083`
+- **Subject ROC-AUC mean**: `0.6333`
 
-| Chỉ Số Đánh Giá | Ước Lượng Điểm (Point Estimate) | Khoảng Tin Cậy 95% CI (Patient Bootstrap) |
-|---|:---:|:---:|
-| **Accuracy** | **87.50%** | [62.50%, 100.00%] |
-| **Balanced Accuracy** | **75.00%** | [50.00%, 100.00%] |
-| **Recall / Sensitivity (Độ Nhạy)** | **100.00%** | [100.00%, 100.00%] |
-| **Specificity (Độ Đặc Hiệu)** | **50.00%** | [0.00%, 100.00%] |
-| **F1-Macro** | **0.7949** | [0.3846, 1.0000] |
-| **ROC-AUC** | **0.7500** | [0.5000, 1.0000] |
-| **Brier Score** | **0.1861** | [0.1022, 0.4029] |
-| **ECE (Expected Calibration Error)** | **0.1180** | N/A |
+#### Holdout Patient Test Set:
+- **F1-macro**: `0.7949`
+- **Balanced Accuracy**: `0.7500`
+- **Recall/Sensitivity**: `1.0000`
+- **Specificity**: `0.5000`
+- **ROC-AUC**: `1.0000`
+- **ECE (5 bins)**: `0.0513`
 
-> **Nhận xét chuyên môn:** Mặc dù điểm F1-macro trên Holdout đạt `0.7949` và Recall đạt `100%`, khoảng tin cậy 95% CI từ Patient Bootstrap vẫn rất rộng ([62.5%, 100.0%]). Điều này minh chứng cho sự bất định thống kê khi đánh giá trên tập dữ liệu cỡ nhỏ (32 bệnh nhân), một thực tế quan trọng mà dự án không hề che giấu.
+<!-- GENERATED_RESULTS_END -->
 
 ---
 
@@ -208,9 +212,9 @@ python -m pytest
 
 Nếu bạn đưa dự án này vào CV cho vị trí **Data Scientist / Machine Learning Engineer**, đây là 4 câu chuyện kỹ thuật cốt lõi giúp bạn ghi điểm:
 
-1. **"Tại sao Accuracy 97.4% lại là sai lầm?"** -> Giải thích bài toán Data Leakage trong dữ liệu y tế gồm nhiều bản ghi trên cùng một bệnh nhân.
+1. **"Tại sao Accuracy 92.31% vẫn có thể gây hiểu nhầm?"** -> Trình bày audit cho thấy 24/24 bệnh nhân test bị trùng với train khi chia theo bản ghi.
 2. **"Làm sao để đảm bảo mô hình không nhìn thấy tập Test?"** -> Trình bày kiến trúc `subject_holdout_split` và cách tìm ngưỡng decision threshold hoàn toàn từ Out-Of-Fold (OOF).
-3. **"Xác suất của mô hình có đáng tin cậy không?"** -> Trình bày kỹ thuật `Group-Aware Sigmoid Calibration` để tối ưu Brier Score và ECE.
+3. **"Xác suất của mô hình có đáng tin cậy không?"** -> Trình bày `Group-Aware Sigmoid Calibration`, Brier Score và ECE, đồng thời nêu rõ calibration trên mẫu nhỏ chưa phải xác suất nguy cơ lâm sàng.
 4. **"Dữ liệu nhỏ có đáng tin không?"** -> Chứng minh tư duy thống kê qua thuật toán `Patient Cluster Bootstrap 95% CI`.
 
 ---

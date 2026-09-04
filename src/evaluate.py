@@ -23,6 +23,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import StratifiedKFold
 
 from src.data import SUBJECT_COLUMN, TARGET_COLUMN, build_subject_table
+from src.utils import normalize_aggregation, positive_class_probability
 
 
 def make_subject_folds(
@@ -48,7 +49,7 @@ def make_subject_folds(
     """
     subject_table = build_subject_table(frame).reset_index(drop=True)
     class_counts = subject_table[TARGET_COLUMN].value_counts()
-    
+
     if class_counts.min() < n_splits:
         raise ValueError(
             f"Không thể tạo {n_splits} fold có đủ hai lớp; lớp ít nhất chỉ có "
@@ -60,7 +61,7 @@ def make_subject_folds(
         shuffle=True,
         random_state=random_state,
     )
-    
+
     folds: list[tuple[np.ndarray, np.ndarray]] = []
     for subject_fit, subject_valid in splitter.split(
         subject_table,
@@ -68,20 +69,20 @@ def make_subject_folds(
     ):
         fit_ids = set(subject_table.iloc[subject_fit][SUBJECT_COLUMN])
         valid_ids = set(subject_table.iloc[subject_valid][SUBJECT_COLUMN])
-        
+
         # Kiểm tra bảo vệ không rò rỉ nhóm bệnh nhân
         if not fit_ids.isdisjoint(valid_ids):
             raise AssertionError("Phát hiện rò rỉ nhóm bệnh nhân trong cross-validation.")
-            
+
         fit_index = np.flatnonzero(frame[SUBJECT_COLUMN].isin(fit_ids).to_numpy())
         valid_index = np.flatnonzero(frame[SUBJECT_COLUMN].isin(valid_ids).to_numpy())
-        
+
         # Đảm bảo fold đánh giá luôn có cả 2 lớp 0 và 1
         if frame.iloc[valid_index][TARGET_COLUMN].nunique() != 2:
             raise AssertionError("Fold validation bắt buộc phải có cả lớp 0 và lớp 1.")
-            
+
         folds.append((fit_index, valid_index))
-        
+
     return folds
 
 
@@ -100,8 +101,7 @@ def positive_score(estimator, features: pd.DataFrame) -> np.ndarray:
     """
 
     if hasattr(estimator, "predict_proba"):
-        class_index = int(np.flatnonzero(estimator.classes_ == 1)[0])
-        return estimator.predict_proba(features)[:, class_index]
+        return positive_class_probability(estimator, features)
     if hasattr(estimator, "decision_function"):
         return np.asarray(estimator.decision_function(features), dtype=float)
     raise TypeError("Mô hình không cung cấp phương thức predict_proba hoặc decision_function.")
@@ -127,10 +127,10 @@ def calculate_metrics(y_true, y_pred, y_score) -> dict[str, float]:
     y_true, y_pred, y_score = map(np.asarray, (y_true, y_pred, y_score))
     if np.unique(y_true).size != 2:
         raise ValueError("Không thể đánh giá chỉ số: y_true bắt buộc phải có đủ hai lớp 0 và 1.")
-        
+
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
-    
-    return {
+
+    metrics = {
         "Accuracy": accuracy_score(y_true, y_pred),
         "Balanced Accuracy": balanced_accuracy_score(y_true, y_pred),
         "Precision": precision_score(y_true, y_pred, zero_division=0),
@@ -138,8 +138,15 @@ def calculate_metrics(y_true, y_pred, y_score) -> dict[str, float]:
         "Specificity": tn / (tn + fp) if (tn + fp) > 0 else 0.0,
         "F1-macro": f1_score(y_true, y_pred, average="macro", zero_division=0),
         "ROC-AUC": roc_auc_score(y_true, y_score),
-        "Brier score": brier_score_loss(y_true, y_score),
     }
+
+    if np.all((y_score >= 0.0) & (y_score <= 1.0)):
+        metrics["Brier score"] = brier_score_loss(y_true, y_score)
+    else:
+        metrics["Brier score"] = np.nan
+
+    return metrics
+
 
 
 def aggregate_subject_predictions(
@@ -166,16 +173,7 @@ def aggregate_subject_predictions(
     Raises:
         ValueError: Nếu tên quy tắc gộp không nằm trong danh sách hỗ trợ.
     """
-    aggregation_functions = {
-        "mean": "mean",
-        "median": "median",
-        "max": "max",
-    }
-    if aggregation not in aggregation_functions:
-        raise ValueError(
-            f"Cách gộp {aggregation!r} không hợp lệ; "
-            f"chọn một trong {sorted(aggregation_functions)}."
-        )
+    aggregation = normalize_aggregation(aggregation)
 
     records = pd.DataFrame(
         {
@@ -184,14 +182,37 @@ def aggregate_subject_predictions(
             "probability": np.asarray(probabilities, dtype=float),
         }
     )
-    
+
     subjects = records.groupby(SUBJECT_COLUMN, as_index=False).agg(
         status=(TARGET_COLUMN, "first"),
-        probability=("probability", aggregation_functions[aggregation]),
+        probability=("probability", aggregation),
         recordings=("probability", "size"),
     )
     subjects["prediction"] = (subjects["probability"] >= threshold).astype(int)
     return subjects
+
+
+def evaluate_subject_fold(
+    estimator,
+    validation_frame: pd.DataFrame,
+    probabilities: np.ndarray,
+    *,
+    aggregation: str = "mean",
+    threshold: float = 0.5,
+) -> dict[str, float]:
+    """Đánh giá một validation fold ở cấp độ bệnh nhân."""
+    subjects = aggregate_subject_predictions(
+        validation_frame,
+        probabilities,
+        aggregation=aggregation,
+        threshold=threshold,
+    )
+
+    return calculate_metrics(
+        subjects["status"],
+        subjects["prediction"],
+        subjects["probability"],
+    )
 
 
 def select_decision_threshold(
@@ -226,7 +247,7 @@ def select_decision_threshold(
         prediction = (probabilities >= threshold).astype(int)
         metrics = calculate_metrics(subjects["status"], prediction, probabilities)
         rows.append({"Threshold": float(threshold), **metrics})
-        
+
     table = pd.DataFrame(rows)
     # Lọc danh sách ứng viên thỏa mãn chỉ tiêu Specificity tối thiểu
     eligible = table[table["Specificity"] >= minimum_specificity]
@@ -290,7 +311,7 @@ def bootstrap_subject_confidence_intervals(
     )
     rng = np.random.default_rng(random_state)
     samples: list[dict[str, float]] = []
-    
+
     for _ in range(n_bootstrap):
         # Lấy mẫu có hoàn lại theo dòng bệnh nhân
         sampled = subjects.iloc[rng.integers(0, len(subjects), size=len(subjects))]
@@ -303,7 +324,7 @@ def bootstrap_subject_confidence_intervals(
                 sampled["probability"],
             )
         )
-        
+
     distribution = pd.DataFrame(samples)
     return pd.DataFrame(
         [
@@ -317,4 +338,3 @@ def bootstrap_subject_confidence_intervals(
             for metric, value in point.items()
         ]
     )
-

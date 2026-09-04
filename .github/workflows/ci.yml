@@ -9,12 +9,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements-dev.txt
-      - run: ruff check .
-      - run: ruff format --check .
-      - run: python -m compileall -q src app tests
-      - run: pytest -q
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint with Ruff
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Run Pytest
+        run: pytest -q
+
+      - name: Validate README results synchronization
+        run: python tools/update_readme_results.py --check
+
+      - name: Validate Colab notebook
+        run: |
+          python notebooks/build_colab_notebook.py
+          python notebooks/validate_colab_notebook.py
+          git diff --exit-code notebooks/02_colab_reproducible.ipynb
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API image
+        run: docker build --target api -t parkinson-api .
+
+      - name: Start API container
+        run: docker run -d --name parkinson-api -p 8000:8000 parkinson-api
+
+      - name: Wait for API healthcheck
+        run: |
+          for i in {1..20}; do
+            curl -f http://localhost:8000/health && exit 0
+            sleep 2
+          done
+          exit 1
+
+      - name: Build UI image
+        run: docker build --target ui -t parkinson-ui .

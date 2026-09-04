@@ -2,29 +2,30 @@
 
 Thực hiện toàn bộ quy trình:
 1. Chia Holdout theo bệnh nhân (`subject_holdout_split`).
-2. Benchmark các mô hình ứng viên.
-3. Lựa chọn mô hình Champion dựa trên F1-macro CV trung bình.
-4. Hiệu chỉnh xác suất Sigmoid lồng nhóm bệnh nhân.
-5. Chọn quy tắc gộp xác suất và ngưỡng quyết định tối ưu từ OOF Train.
-6. Đóng gói mô hình calibrated pipeline cùng siêu dữ liệu.
+2. Benchmark các mô hình ứng viên ở cấp bệnh nhân (`search_subject_level`).
+3. Lựa chọn mô hình Champion dựa trên Subject F1-macro CV trung bình.
+4. Đánh giá lồng Nested Cross-Validation (`nested_subject_evaluation`).
+5. Hiệu chỉnh xác suất Sigmoid lồng nhóm bệnh nhân.
+6. Chọn quy tắc gộp xác suất và ngưỡng quyết định tối ưu từ OOF Train.
+7. Đóng gói mô hình calibrated pipeline cùng siêu dữ liệu môi trường.
 """
-
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import joblib
 import numpy as np
 import pandas as pd
+import sklearn
 from sklearn.base import clone
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import GridSearchCV
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.svm import SVC
@@ -40,33 +41,19 @@ from src.evaluate import (
     select_decision_threshold,
 )
 from src.features import MODEL_FEATURES, REDUNDANT_FEATURES, make_pipeline
+from src.model_selection import (
+    nested_subject_evaluation,
+    search_subject_level,
+)
 from src.utils import sha256_file
 
 CONFIG_PATH = Path(__file__).parents[1] / "configs" / "default.json"
 DEFAULT_CONFIG = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 RANDOM_STATE = int(DEFAULT_CONFIG["random_state"])
 
-SCORING = {
-    "accuracy": "accuracy",
-    "balanced_accuracy": "balanced_accuracy",
-    "f1_macro": "f1_macro",
-    "roc_auc": "roc_auc",
-}
-
 
 def _calibrated_estimator(estimator, frame: pd.DataFrame) -> CalibratedClassifierCV:
-    """Tạo bộ hiệu chỉnh Sigmoid Calibration đóng gói các fold phân chia theo bệnh nhân.
-
-    Sử dụng `CalibratedClassifierCV` với `method='sigmoid'`, đảm bảo các fold hiệu chỉnh xác suất
-    nội bộ tuân thủ nghiêm ngặt quy tắc độc lập bệnh nhân.
-
-    Args:
-        estimator: Mô hình gốc chưa hiệu chỉnh (đã được nhân bản bằng `clone`).
-        frame: DataFrame tập huấn luyện.
-
-    Returns:
-        CalibratedClassifierCV: Đối tượng đã cấu hình các fold chia theo bệnh nhân.
-    """
+    """Tạo bộ hiệu chỉnh Sigmoid Calibration đóng gói các fold phân chia theo bệnh nhân."""
     folds = make_subject_folds(
         frame,
         n_splits=int(DEFAULT_CONFIG["calibration_splits"]),
@@ -83,40 +70,25 @@ def _group_oof_calibration(
     estimator,
     frame: pd.DataFrame,
 ) -> np.ndarray:
-    """Sinh mảng xác suất Out-Of-Fold (OOF) được hiệu chỉnh Sigmoid theo nhóm bệnh nhân.
-
-    Chia tập train thành các outer folds độc lập theo bệnh nhân. Trên mỗi outer fold fit,
-    huấn luyện mô hình đã calibrated (bằng inner folds bệnh nhân), sau đó dự đoán xác suất
-    cho outer fold validation.
-
-    Args:
-        estimator: Mô hình Champion chưa hiệu chỉnh.
-        frame: DataFrame dữ liệu tập huấn luyện.
-
-    Returns:
-        np.ndarray: Mảng xác suất OOF đầy đủ cho mọi bản ghi trong tập train.
-
-    Raises:
-        AssertionError: Nếu có bản ghi nào bị khuyết xác suất OOF (chứa NaN).
-    """
+    """Sinh mảng xác suất Out-Of-Fold (OOF) được hiệu chỉnh Sigmoid theo nhóm bệnh nhân."""
     outer_folds = make_subject_folds(
         frame,
         n_splits=int(DEFAULT_CONFIG["calibration_splits"]),
         random_state=RANDOM_STATE + 29,
     )
     oof = np.full(len(frame), np.nan)
-    
+
     for fit_index, valid_index in outer_folds:
         fit_frame = frame.iloc[fit_index].reset_index(drop=True)
         model = _calibrated_estimator(estimator, fit_frame)
         model.fit(fit_frame[MODEL_FEATURES], fit_frame[TARGET_COLUMN])
-        
+
         validation_features = frame.iloc[valid_index][MODEL_FEATURES]
         oof[valid_index] = positive_score(model, validation_features)
-        
+
     if np.isnan(oof).any():
         raise AssertionError("Hiệu chỉnh OOF chưa tạo xác suất cho mọi bản ghi train.")
-        
+
     return oof
 
 
@@ -124,24 +96,11 @@ def _select_patient_rule(
     frame: pd.DataFrame,
     oof_probabilities: np.ndarray,
 ) -> tuple[str, float, pd.DataFrame, pd.DataFrame]:
-    """Tìm quy tắc gộp xác suất và ngưỡng quyết định tối ưu từ OOF Train.
-
-
-    Tự động thử nghiệm các chiến lược gộp xác suất bản ghi theo bệnh nhân và quét ngưỡng quyết định
-    để tối đa hóa Balanced Accuracy trên OOF Train mà không hề chạm đến tập Holdout Test.
-
-    Args:
-        frame: DataFrame tập huấn luyện.
-        oof_probabilities: Mảng xác suất OOF của tập train.
-
-    Returns:
-        tuple[str, float, pd.DataFrame, pd.DataFrame]:
-            (tên cách gộp tối ưu, ngưỡng chọn tối ưu, bảng dự đoán OOF bệnh nhân, bảng quét ngưỡng).
-    """
+    """Tìm quy tắc gộp xác suất và ngưỡng quyết định tối ưu từ OOF Train."""
     candidates = []
     threshold_tables = []
     selected_subjects: dict[str, pd.DataFrame] = {}
-    
+
     for aggregation in DEFAULT_CONFIG["aggregation_candidates"]:
         subjects = aggregate_subject_predictions(
             frame,
@@ -168,8 +127,7 @@ def _select_patient_rule(
         threshold_table.insert(0, "Aggregation", aggregation)
         threshold_tables.append(threshold_table)
         selected_subjects[aggregation] = subjects
-        
-    # Xếp hạng ứng viên gộp xác suất
+
     comparison = pd.DataFrame(candidates).sort_values(
         ["Balanced Accuracy", "F1-macro", "Specificity", "Brier score"],
         ascending=[False, False, False, True],
@@ -177,7 +135,7 @@ def _select_patient_rule(
     best = comparison.iloc[0]
     aggregation = str(best["Aggregation"])
     threshold = float(best["Selected threshold"])
-    
+
     return (
         aggregation,
         threshold,
@@ -191,19 +149,7 @@ def _feature_selection_stability(
     frame: pd.DataFrame,
     folds: list[tuple[np.ndarray, np.ndarray]],
 ) -> pd.DataFrame:
-    """Thống kê tần suất lựa chọn của từng đặc trưng qua các fold Cross-Validation.
-
-    Đánh giá độ ổn định của bước `SelectKBest` nhằm hiểu rõ các đặc trưng nào thường xuyên
-    được chọn nhất trong quá trình huấn luyện.
-
-    Args:
-        estimator: Pipeline huấn luyện mô hình.
-        frame: DataFrame tập huấn luyện.
-        folds: Danh sách các fold CV.
-
-    Returns:
-        pd.DataFrame: Bảng thống kê số lần và tỷ lệ chọn của từng đặc trưng.
-    """
+    """Thống kê tần suất lựa chọn của từng đặc trưng qua các fold Cross-Validation."""
     counts = pd.Series(0, index=MODEL_FEATURES, dtype=int)
     for fit_index, _ in folds:
         fold_model = clone(estimator)
@@ -212,7 +158,7 @@ def _feature_selection_stability(
         selector = fold_model.named_steps.get("select")
         selected = np.asarray(MODEL_FEATURES)[selector.get_support()]
         counts.loc[selected] += 1
-        
+
     return pd.DataFrame(
         {
             "Feature": counts.index,
@@ -223,11 +169,7 @@ def _feature_selection_stability(
 
 
 def model_specs() -> dict:
-    """Định nghĩa cấu hình danh sách các mô hình ứng viên và lưới tham số (hyperparameter grid).
-
-    Returns:
-        dict: Từ điển ánh xạ tên mô hình -> (Pipeline chưa fit, GridSearchCV param_grid).
-    """
+    """Định nghĩa cấu hình danh sách các mô hình ứng viên và lưới tham số."""
     return {
         "Dummy": (Pipeline([("model", DummyClassifier(strategy="prior"))]), {}),
         "Logistic Regression": (
@@ -253,9 +195,7 @@ def model_specs() -> dict:
                 "model__p": [1, 2],
             },
         ),
-        # Không bật probability=True cho SVC để tránh hiệu chỉnh ngầm rò rỉ nhóm
         "SVM (RBF, decision score)": (
-
             make_pipeline(SVC(probability=False, random_state=RANDOM_STATE)),
             {
                 "select__k": [10, 15, "all"],
@@ -299,74 +239,76 @@ def model_specs() -> dict:
 
 
 def train(data_path: str | Path, artifact_dir: str | Path = "artifacts") -> pd.DataFrame:
-    """Thực hiện quy trình huấn luyện toàn diện, benchmark, hiệu chỉnh và xuất artifact kết quả.
-
-    Args:
-        data_path: Đường dẫn tới tệp CSV dữ liệu giọng nói Parkinson.
-        artifact_dir: Thư mục lưu trữ các tệp mô hình joblib và báo cáo CSV/JSON.
-
-    Returns:
-        pd.DataFrame: Bảng kết quả Benchmark của tất cả mô hình ứng viên.
-    """
+    """Thực hiện quy trình huấn luyện toàn diện, benchmark, hiệu chỉnh và xuất artifact kết quả."""
     frame = load_data(data_path)
-    
-    # 1. Chia tập Holdout độc lập theo từng bệnh nhân
+
+    # 1. Chia Holdout độc lập theo từng bệnh nhân
     train_frame, test_frame = subject_holdout_split(
         frame,
         test_size=float(DEFAULT_CONFIG["test_size"]),
         random_state=RANDOM_STATE,
     )
-    
+
     # 2. Tạo danh sách các fold Cross-Validation theo bệnh nhân cho tập Train
     folds = make_subject_folds(
         train_frame,
         n_splits=int(DEFAULT_CONFIG["benchmark_splits"]),
         random_state=RANDOM_STATE,
     )
-    
+
     rows, searches = [], {}
-    X_train, y_train = train_frame[MODEL_FEATURES], train_frame[TARGET_COLUMN]
-    
-    # 3. Benchmark tất cả mô hình qua GridSearchCV với CV theo bệnh nhân
-    for name, (estimator, grid) in model_specs().items():
-        search = GridSearchCV(
+
+    # 3. Benchmark tất cả mô hình ở cấp độ bệnh nhân
+    specs = model_specs()
+    for name, (estimator, grid) in specs.items():
+        best_candidate, _ = search_subject_level(
             estimator,
             grid,
-            scoring=SCORING,
-            refit="f1_macro",
-            cv=folds,
-            n_jobs=-1,
-            error_score="raise",
+            train_frame,
+            folds,
+            MODEL_FEATURES,
         )
-        search.fit(X_train, y_train)
-        result, index = search.cv_results_, search.best_index_
-        
+
         rows.append(
             {
                 "Model": name,
-                "CV F1-macro mean": result["mean_test_f1_macro"][index],
-                "CV F1-macro std": result["std_test_f1_macro"][index],
-                "CV Balanced Accuracy": result["mean_test_balanced_accuracy"][index],
-                "CV ROC-AUC": result["mean_test_roc_auc"][index],
+                "Subject F1-macro mean": float(best_candidate["Subject F1-macro mean"]),
+                "Subject F1-macro std": float(best_candidate["Subject F1-macro std"]),
+                "Subject Balanced Accuracy mean": float(
+                    best_candidate["Subject Balanced Accuracy mean"]
+                ),
+                "Subject ROC-AUC mean": float(best_candidate["Subject ROC-AUC mean"]),
                 "Best parameters": json.dumps(
-                    search.best_params_,
+                    best_candidate["Parameters"],
                     ensure_ascii=False,
                 ),
             }
         )
-        searches[name] = search
+
+        best_model = clone(estimator).set_params(**best_candidate["Parameters"])
+        searches[name] = best_model
 
     benchmark = pd.DataFrame(rows).sort_values(
-        ["CV F1-macro mean", "CV ROC-AUC"],
+        ["Subject F1-macro mean", "Subject Balanced Accuracy mean", "Subject ROC-AUC mean"],
         ascending=False,
     )
 
     # 4. Lựa chọn Champion triển khai (chỉ chọn mô hình cung cấp xác suất)
     deployable = benchmark[benchmark["Model"] != "SVM (RBF, decision score)"]
     champion_name = str(deployable.iloc[0]["Model"])
-    champion = searches[champion_name].best_estimator_
+    champion = searches[champion_name]
 
-    # 5. Hiệu chỉnh Sigmoid lồng nhóm bệnh nhân và tìm quy tắc gộp dự đoán OOF
+    # 5. Đánh giá Nested Cross-Validation cấp bệnh nhân
+    nested_results = nested_subject_evaluation(
+        train_frame,
+        specs,
+        feature_columns=MODEL_FEATURES,
+        outer_splits=5,
+        inner_splits=3,
+        random_state=RANDOM_STATE,
+    )
+
+    # 6. Hiệu chỉnh Sigmoid lồng nhóm bệnh nhân và tìm quy tắc gộp dự đoán OOF
     oof_probabilities = _group_oof_calibration(
         champion,
         train_frame,
@@ -375,7 +317,7 @@ def train(data_path: str | Path, artifact_dir: str | Path = "artifacts") -> pd.D
         train_frame,
         oof_probabilities,
     )
-    
+
     calibration_metrics = calculate_metrics(
         oof_subjects["status"],
         oof_subjects["prediction"],
@@ -386,11 +328,11 @@ def train(data_path: str | Path, artifact_dir: str | Path = "artifacts") -> pd.D
         oof_subjects["probability"],
     )
 
-    # 6. Fit mô hình Calibrated cuối cùng trên toàn bộ tập Train
+    # 7. Fit mô hình Calibrated cuối cùng trên toàn bộ tập Train
     calibrated_model = _calibrated_estimator(champion, train_frame)
-    calibrated_model.fit(X_train, y_train)
+    calibrated_model.fit(train_frame[MODEL_FEATURES], train_frame[TARGET_COLUMN])
 
-    # 7. Đánh giá duy nhất 1 lần trên tập Holdout Test độc lập
+    # 8. Đánh giá duy nhất 1 lần trên tập Holdout Test độc lập
     test_probability = positive_score(calibrated_model, test_frame[MODEL_FEATURES])
     test_subjects = aggregate_subject_predictions(
         test_frame,
@@ -407,11 +349,12 @@ def train(data_path: str | Path, artifact_dir: str | Path = "artifacts") -> pd.D
         test_subjects["status"],
         test_subjects["probability"],
     )
-    
-    # 8. Ước lượng khoảng tin cậy 95% CI bằng Patient Cluster Bootstrap
+
+    # 9. Ước lượng khoảng tin cậy 95% CI bằng Patient Cluster Bootstrap
     confidence_intervals = bootstrap_subject_confidence_intervals(test_subjects)
 
-    # 9. Đóng gói Artifact và xuất kết quả
+    # 10. Đóng gói Artifact và xuất kết quả
+    data_hash = sha256_file(data_path)
     bundle = {
         "model": calibrated_model,
         "champion_name": f"{champion_name} + sigmoid calibration",
@@ -419,36 +362,67 @@ def train(data_path: str | Path, artifact_dir: str | Path = "artifacts") -> pd.D
         "original_feature_columns": ORIGINAL_FEATURES,
         "dropped_redundant_features": REDUNDANT_FEATURES,
         "decision_threshold": threshold,
+        "probability_aggregation": aggregation,
         "random_state": RANDOM_STATE,
         "holdout_subjects": sorted(test_frame["subject_id"].unique()),
-        "probability_aggregation": aggregation,
         "calibration": "sigmoid with subject-level folds",
         "oof_calibration_metrics": calibration_metrics,
         "holdout_subject_metrics": test_metrics,
         "training_config": DEFAULT_CONFIG,
-        "data_sha256": sha256_file(data_path),
+        "data_sha256": data_hash,
+        "artifact_version": "1.1.0",
+        "schema_version": "1.0.0",
+        "python_version": sys.version.split()[0],
+        "sklearn_version": sklearn.__version__,
     }
 
     output = Path(artifact_dir)
     output.mkdir(parents=True, exist_ok=True)
-    
+
     joblib.dump(bundle, output / "parkinsons_calibrated_pipeline.joblib")
     benchmark.to_csv(output / "model_benchmark.csv", index=False)
+    nested_results.to_csv(output / "nested_cv_results.csv", index=False)
     oof_subjects.to_csv(output / "oof_subject_predictions.csv", index=False)
     test_subjects.to_csv(output / "holdout_subject_predictions.csv", index=False)
     confidence_intervals.to_csv(output / "holdout_bootstrap_ci.csv", index=False)
     threshold_table.to_csv(output / "oof_threshold_search.csv", index=False)
-    
+
     feature_stability = _feature_selection_stability(champion, train_frame, folds)
     feature_stability.to_csv(output / "feature_selection_stability.csv", index=False)
 
-    metrics = {
-        "champion": bundle["champion_name"],
-        "probability_aggregation": aggregation,
-        "decision_threshold": threshold,
-        "oof_calibration": calibration_metrics,
-        "holdout_subject": test_metrics,
+    nested_metrics = {
+        "F1-macro mean": float(nested_results["F1-macro"].mean()),
+        "F1-macro std": float(nested_results["F1-macro"].std(ddof=0)),
+        "Balanced Accuracy mean": float(nested_results["Balanced Accuracy"].mean()),
+        "ROC-AUC mean": float(nested_results["ROC-AUC"].mean()),
     }
+
+    metrics = {
+        "dataset": {
+            "records": len(frame),
+            "subjects": int(frame["subject_id"].nunique()),
+            "features_original": len(ORIGINAL_FEATURES),
+            "features_model": len(MODEL_FEATURES),
+        },
+        "selection": {
+            "unit": "subject",
+            "primary_metric": "F1-macro",
+            "champion": bundle["champion_name"],
+        },
+        "nested_cv_subject": nested_metrics,
+        "holdout_subject": test_metrics,
+        "calibration": {
+            "method": "sigmoid",
+            "aggregation": aggregation,
+            "threshold": threshold,
+        },
+        "reproducibility": {
+            "random_state": RANDOM_STATE,
+            "data_sha256": data_hash,
+            "sklearn_version": sklearn.__version__,
+        },
+    }
+
     (output / "metrics.json").write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -462,4 +436,3 @@ if __name__ == "__main__":
     parser.add_argument("--artifacts", default="artifacts", help="Thư mục lưu trữ artifact.")
     args = parser.parse_args()
     print(train(args.data, args.artifacts).to_string(index=False))
-

@@ -42,4 +42,3 @@ def make_pipeline(model: BaseEstimator, *, scale: bool = True) -> Pipeline:
             ("model", model),
         ]
     )
-

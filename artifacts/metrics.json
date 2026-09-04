@@ -1,17 +1,20 @@
 {
-  "champion": "KNN + sigmoid calibration",
-  "probability_aggregation": "max",
-  "decision_threshold": 0.835,
-  "oof_calibration": {
-    "Accuracy": 0.375,
-    "Balanced Accuracy": 0.5833333333333334,
-    "Precision": 1.0,
-    "Recall/Sensitivity": 0.16666666666666666,
-    "Specificity": 1.0,
-    "F1-macro": 0.36507936507936506,
-    "ROC-AUC": 0.5601851851851851,
-    "Brier score": 0.17964878785418725,
-    "ECE (5 bins)": 0.12115057026872703
+  "dataset": {
+    "records": 195,
+    "subjects": 32,
+    "features_original": 22,
+    "features_model": 20
+  },
+  "selection": {
+    "unit": "subject",
+    "primary_metric": "F1-macro",
+    "champion": "KNN + sigmoid calibration"
+  },
+  "nested_cv_subject": {
+    "F1-macro mean": 0.5190476190476191,
+    "F1-macro std": 0.3283297938273943,
+    "Balanced Accuracy mean": 0.6083333333333333,
+    "ROC-AUC mean": 0.6333333333333333
   },
   "holdout_subject": {
     "Accuracy": 0.875,
@@ -20,8 +23,18 @@
     "Recall/Sensitivity": 1.0,
     "Specificity": 0.5,
     "F1-macro": 0.7948717948717949,
-    "ROC-AUC": 0.75,
-    "Brier score": 0.1861015105822889,
-    "ECE (5 bins)": 0.11798540697532027
+    "ROC-AUC": 1.0,
+    "Brier score": 0.11238035518798335,
+    "ECE (5 bins)": 0.05130513857372418
+  },
+  "calibration": {
+    "method": "sigmoid",
+    "aggregation": "median",
+    "threshold": 0.7499999999999999
+  },
+  "reproducibility": {
+    "random_state": 42,
+    "data_sha256": "32e6040916d2f5b80b49589d925a92bd25420687c76be19d72e37205e104abe6",
+    "sklearn_version": "1.5.2"
   }
 }

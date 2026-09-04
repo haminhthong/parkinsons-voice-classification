@@ -1,0 +1,9 @@
+{
+  "split_unit": "record",
+  "test_size": 0.2,
+  "random_state": 42,
+  "model": "RandomForestClassifier",
+  "test_subjects": 24,
+  "overlapping_test_subjects": 24,
+  "accuracy": 0.9230769230769231
+}

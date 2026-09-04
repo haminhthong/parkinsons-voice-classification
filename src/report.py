@@ -14,9 +14,12 @@ import argparse
 import json
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+import matplotlib
 import pandas as pd
 from matplotlib.lines import Line2D
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
 
 
 def _save_figure(figure: plt.Figure, path: Path) -> None:
@@ -53,17 +56,18 @@ def create_portfolio_figures(
     holdout = pd.read_csv(artifact_dir / "holdout_subject_predictions.csv")
     stability = pd.read_csv(artifact_dir / "feature_selection_stability.csv")
     threshold_search = pd.read_csv(artifact_dir / "oof_threshold_search.csv")
-    metrics = json.loads((artifact_dir / "metrics.json").read_text(encoding="utf-8"))
+    raw_metrics = json.loads((artifact_dir / "metrics.json").read_text(encoding="utf-8"))
+    decision_threshold = float(raw_metrics.get("calibration", {}).get("threshold", raw_metrics.get("decision_threshold", 0.5)))
 
     paths: list[Path] = []
 
     # Biểu đồ 1: Benchmark các mô hình ứng viên
-    benchmark_plot = benchmark.sort_values("CV F1-macro mean")
+    benchmark_plot = benchmark.sort_values("Subject F1-macro mean")
     figure, axis = plt.subplots(figsize=(9, 5))
     axis.errorbar(
-        benchmark_plot["CV F1-macro mean"],
+        benchmark_plot["Subject F1-macro mean"],
         benchmark_plot["Model"],
-        xerr=benchmark_plot["CV F1-macro std"],
+        xerr=benchmark_plot["Subject F1-macro std"],
         fmt="o",
         color="#1f5f8b",
         ecolor="#9ecae1",
@@ -86,10 +90,10 @@ def create_portfolio_figures(
         s=85,
     )
     axis.axhline(
-        metrics["decision_threshold"],
+        decision_threshold,
         color="#222222",
         linestyle="--",
-        label=f"Ngưỡng OOF = {metrics['decision_threshold']:.3f}",
+        label=f"Ngưỡng OOF = {decision_threshold:.3f}",
     )
     axis.set(
         ylim=(0, 1),
@@ -122,7 +126,7 @@ def create_portfolio_figures(
             [0],
             color="#222222",
             linestyle="--",
-            label=f"Ngưỡng OOF = {metrics['decision_threshold']:.3f}",
+            label=f"Ngưỡng OOF = {decision_threshold:.3f}",
         ),
     ]
     axis.legend(handles=legend_items)
@@ -154,7 +158,7 @@ def create_portfolio_figures(
             label=aggregation,
         )
     axis.axvline(
-        metrics["decision_threshold"],
+        decision_threshold,
         color="#222222",
         linestyle="--",
         label="Ngưỡng được chọn",
@@ -181,4 +185,3 @@ if __name__ == "__main__":
     arguments = parser.parse_args()
     for figure_path in create_portfolio_figures(arguments.artifacts, arguments.output):
         print(figure_path)
-

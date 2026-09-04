@@ -91,19 +91,23 @@ def validate_dataframe(
     Raises:
         ValueError: Nếu thiếu cột, dữ liệu sai định dạng hoặc nhãn không đồng nhất.
     """
+    if frame.empty:
+        raise ValueError("CSV không có bản ghi.")
+
     required = set(ORIGINAL_FEATURES)
+
     if require_target:
         required.add(TARGET_COLUMN)
     if require_name:
         required.add(ID_COLUMN)
-    
+
     missing = sorted(required.difference(frame.columns))
     if missing:
         raise ValueError(f"Thiếu cột bắt buộc: {missing}")
 
     result = frame.copy()
     numeric_columns = ORIGINAL_FEATURES + ([TARGET_COLUMN] if require_target else [])
-    
+
     # Ép kiểu dữ liệu về số và kiểm tra lỗi định dạng
     for column in numeric_columns:
         try:
@@ -116,18 +120,17 @@ def validate_dataframe(
         raise ValueError("Dữ liệu có giá trị thiếu (NaN).")
     if not np.isfinite(result[numeric_columns].to_numpy(dtype=float)).all():
         raise ValueError("Dữ liệu có giá trị không hữu hạn (NaN hoặc ±inf).")
-        
+
     # Kiểm tra nhãn status (chỉ gồm 0 và 1)
     if require_target and not set(result[TARGET_COLUMN].unique()).issubset({0, 1}):
         raise ValueError("status chỉ được gồm hai nhãn 0 và 1.")
-
 
     # Trích xuất mã bệnh nhân và kiểm tra tính đồng nhất của nhãn
     if require_name:
         if result[ID_COLUMN].isna().any():
             raise ValueError("Cột name không được để trống.")
         result[SUBJECT_COLUMN] = result[ID_COLUMN].map(subject_id_from_name)
-        
+
         if require_target:
             label_counts = result.groupby(SUBJECT_COLUMN)[TARGET_COLUMN].nunique()
             if not label_counts.eq(1).all():
@@ -191,16 +194,15 @@ def subject_holdout_split(
         random_state=random_state,
         stratify=subjects[TARGET_COLUMN],
     )
-    
+
     train_ids = set(train_subjects[SUBJECT_COLUMN])
     test_ids = set(test_subjects[SUBJECT_COLUMN])
-    
+
     # Kiểm tra bảo vệ chống rò rỉ tập dữ liệu
     if not train_ids.isdisjoint(test_ids):
         raise AssertionError("Phát hiện bệnh nhân xuất hiện ở cả tập huấn luyện và tập kiểm tra.")
-        
+
     return (
         frame[frame[SUBJECT_COLUMN].isin(train_ids)].copy(),
         frame[frame[SUBJECT_COLUMN].isin(test_ids)].copy(),
     )
-

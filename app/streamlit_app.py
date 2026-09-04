@@ -8,16 +8,13 @@ và cho phép xuất tệp kết quả dự đoán dạng CSV.
 from __future__ import annotations
 
 import io
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
+from app.settings import ARTIFACT_PATH, RESEARCH_WARNING
 from src.data import ORIGINAL_FEATURES
 from src.predict import load_bundle, predict_records
-
-# Thư mục chứa mô hình artifact
-ARTIFACT_PATH = Path("artifacts/parkinsons_calibrated_pipeline.joblib")
 
 # Cấu hình giao diện trang web Streamlit
 st.set_page_config(
@@ -27,10 +24,7 @@ st.set_page_config(
 )
 
 st.title("🎙️ Phân loại Giọng nói Parkinson (Leakage-Aware)")
-st.warning(
-    "⚠️ Dự án chỉ phục vụ mục đích nghiên cứu và học tập. "
-    "Mô hình không phải thiết bị y tế và không thay thế chẩn đoán chuyên khoa."
-)
+st.warning(f"⚠️ {RESEARCH_WARNING} Mô hình không phải thiết bị y tế.")
 
 st.markdown(
     "Tải lên tệp CSV chứa cột `name` và 22 đặc trưng tần số/biên độ giọng nói từ bộ dữ liệu UCI. "
@@ -92,4 +86,3 @@ if uploaded_file is not None:
         file_name="parkinsons_subject_predictions.csv",
         mime="text/csv",
     )
-

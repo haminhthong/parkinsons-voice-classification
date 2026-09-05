@@ -2,7 +2,7 @@ import joblib
 import numpy as np
 
 from src.data import TARGET_COLUMN
-from src.predict import load_bundle, predict_records
+from src.predict import load_bundle, predict_records, predict_subject_records
 
 
 def test_saved_model_can_reload_and_reproduce_predictions(frame, artifact_path):
@@ -52,3 +52,26 @@ def test_artifact_contains_environment_metadata(artifact_path):
     }
 
     assert required.issubset(bundle)
+
+
+def test_predict_subject_records_produces_structured_report(frame, artifact_path):
+    sample_sub = frame[frame["subject_id"] == frame["subject_id"].iloc[0]].head(3)
+    recordings = sample_sub.drop(columns=["status", "name", "subject_id"], errors="ignore").to_dict(orient="records")
+    bundle = load_bundle(artifact_path)
+    report = predict_subject_records("sub_test", recordings, bundle)
+    assert report["subject_id"] == "sub_test"
+    assert 0 <= report["screening_score"] <= 1
+    assert isinstance(report["screening_flag"], bool)
+    assert report["n_recordings"] == 3
+    assert len(report["record_probabilities"]) == 3
+
+
+def test_predict_subject_records_detects_ood_value(frame, artifact_path):
+    sample_sub = frame[frame["subject_id"] == frame["subject_id"].iloc[0]].head(3).copy()
+    sample_sub.loc[sample_sub.index[0], "MDVP:Fo(Hz)"] = 99999.0
+    recordings = sample_sub.drop(columns=["status", "name", "subject_id"], errors="ignore").to_dict(orient="records")
+    bundle = load_bundle(artifact_path)
+    bundle["feature_p1_p99"] = {"MDVP:Fo(Hz)": (50.0, 300.0)}
+    report = predict_subject_records("sub_ood", recordings, bundle)
+    assert report["reliability"] == "limited"
+    assert any("FEATURE_OUTSIDE_TRAINING_RANGE" in w for w in report["warnings"])

@@ -134,14 +134,35 @@ def search_subject_level(
     return result.iloc[0], result
 
 
+def _model_complexity_rank(name: str) -> int:
+    """Xếp hạng độ phức tạp tương đối của kiến trúc mô hình (giá trị nhỏ hơn là đơn giản hơn)."""
+    complexity = {
+        "Dummy": 0,
+        "Logistic Regression": 1,
+        "KNN": 2,
+        "Random Forest": 3,
+        "HistGradientBoosting": 4,
+    }
+    return complexity.get(name, 10)
+
+
 def select_champion(
     frame: pd.DataFrame,
     folds: list[tuple[np.ndarray, np.ndarray]],
     model_specs: dict[str, tuple[Any, dict[str, list[Any]]]],
     *,
     feature_columns: list[str] | None = None,
+    f1_tolerance: float = 0.005,
 ) -> ChampionResult:
-    """Lựa chọn mô hình Champion có Subject F1-macro CV cao nhất."""
+    """Lựa chọn mô hình Champion với cơ chế bảo vệ độ ổn định (Stability Guardrail).
+
+    Quy tắc xếp hạng:
+    1. Làm tròn Subject F1-macro mean theo ngưỡng sai khác nhỏ (tolerance) để nhận diện các mô hình hòa điểm.
+    2. Khi các mô hình có F1-macro xấp xỉ nhau, ưu tiên phương sai thấp nhất (-F1 std) nhằm đảm bảo tính ổn định.
+    3. Ưu tiên Balanced Accuracy mean.
+    4. Ưu tiên ROC-AUC mean.
+    5. Ưu tiên kiến trúc đơn giản hơn (simpler model) để tránh overfitting trên tập dữ liệu nhỏ (32 bệnh nhân).
+    """
     if feature_columns is None:
         feature_columns = MODEL_FEATURES
 
@@ -179,14 +200,16 @@ def select_champion(
             )
         )
 
-    champion_candidates.sort(
-        key=lambda c: (
-            c.metrics["Subject F1-macro mean"],
-            c.metrics["Subject Balanced Accuracy mean"],
-            c.metrics["Subject ROC-AUC mean"],
-        ),
-        reverse=True,
-    )
+    def _sort_key(c: ChampionResult) -> tuple:
+        # Nhóm F1 theo bước tolerance để phát hiện tie
+        f1_bucket = round(c.metrics["Subject F1-macro mean"] / f1_tolerance) * f1_tolerance
+        stability = -round(c.metrics["Subject F1-macro std"], 4)
+        bal_acc = round(c.metrics["Subject Balanced Accuracy mean"], 4)
+        roc_auc = round(c.metrics["Subject ROC-AUC mean"], 4)
+        simplicity = -_model_complexity_rank(c.name)
+        return (f1_bucket, stability, bal_acc, roc_auc, simplicity)
+
+    champion_candidates.sort(key=_sort_key, reverse=True)
 
     return champion_candidates[0]
 

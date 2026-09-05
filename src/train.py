@@ -13,7 +13,9 @@ Thực hiện toàn bộ quy trình:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -40,7 +42,12 @@ from src.evaluate import (
     positive_score,
     select_decision_threshold,
 )
-from src.features import MODEL_FEATURES, REDUNDANT_FEATURES, make_pipeline
+from src.features import (
+    MODEL_FEATURES,
+    REDUNDANT_FEATURES,
+    compute_feature_percentiles,
+    make_pipeline,
+)
 from src.model_selection import (
     nested_subject_evaluation,
     search_subject_level,
@@ -141,6 +148,7 @@ def _select_patient_rule(
         threshold,
         selected_subjects[aggregation],
         pd.concat(threshold_tables, ignore_index=True),
+        comparison,
     )
 
 
@@ -313,7 +321,13 @@ def train(data_path: str | Path, artifact_dir: str | Path = "artifacts") -> pd.D
         champion,
         train_frame,
     )
-    aggregation, threshold, oof_subjects, threshold_table = _select_patient_rule(
+    (
+        aggregation,
+        threshold,
+        oof_subjects,
+        threshold_table,
+        aggregation_comparison,
+    ) = _select_patient_rule(
         train_frame,
         oof_probabilities,
     )
@@ -355,6 +369,20 @@ def train(data_path: str | Path, artifact_dir: str | Path = "artifacts") -> pd.D
 
     # 10. Đóng gói Artifact và xuất kết quả
     data_hash = sha256_file(data_path)
+    feature_p1_p99 = compute_feature_percentiles(train_frame, MODEL_FEATURES)
+    holdout_subjects_list = sorted(test_frame["subject_id"].unique())
+    holdout_split_hash = hashlib.sha256(",".join(holdout_subjects_list).encode()).hexdigest()
+
+    try:
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).parents[1],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        git_sha = "unknown"
+
     bundle = {
         "model": calibrated_model,
         "champion_name": f"{champion_name} + sigmoid calibration",
@@ -364,14 +392,36 @@ def train(data_path: str | Path, artifact_dir: str | Path = "artifacts") -> pd.D
         "decision_threshold": threshold,
         "probability_aggregation": aggregation,
         "random_state": RANDOM_STATE,
-        "holdout_subjects": sorted(test_frame["subject_id"].unique()),
+        "holdout_subjects": holdout_subjects_list,
+        "holdout_split_hash": holdout_split_hash,
+        "training_subject_count": int(train_frame["subject_id"].nunique()),
+        "holdout_subject_count": int(test_frame["subject_id"].nunique()),
+        "class_distribution": {
+            "train_subjects": {
+                str(k): int(v)
+                for k, v in train_frame.groupby("subject_id")["status"]
+                .first()
+                .value_counts()
+                .items()
+            },
+            "holdout_subjects": {
+                str(k): int(v)
+                for k, v in test_frame.groupby("subject_id")["status"]
+                .first()
+                .value_counts()
+                .items()
+            },
+        },
+        "feature_p1_p99": feature_p1_p99,
         "calibration": "sigmoid with subject-level folds",
         "oof_calibration_metrics": calibration_metrics,
         "holdout_subject_metrics": test_metrics,
         "training_config": DEFAULT_CONFIG,
         "data_sha256": data_hash,
-        "artifact_version": "1.1.0",
+        "artifact_version": "1.2.0",
         "schema_version": "1.0.0",
+        "feature_contract_version": "1.0.0",
+        "git_commit_sha": git_sha,
         "python_version": sys.version.split()[0],
         "sklearn_version": sklearn.__version__,
     }
@@ -386,6 +436,7 @@ def train(data_path: str | Path, artifact_dir: str | Path = "artifacts") -> pd.D
     test_subjects.to_csv(output / "holdout_subject_predictions.csv", index=False)
     confidence_intervals.to_csv(output / "holdout_bootstrap_ci.csv", index=False)
     threshold_table.to_csv(output / "oof_threshold_search.csv", index=False)
+    aggregation_comparison.to_csv(output / "oof_aggregation_comparison.csv", index=False)
 
     feature_stability = _feature_selection_stability(champion, train_frame, folds)
     feature_stability.to_csv(output / "feature_selection_stability.csv", index=False)
@@ -408,9 +459,15 @@ def train(data_path: str | Path, artifact_dir: str | Path = "artifacts") -> pd.D
             "unit": "subject",
             "primary_metric": "F1-macro",
             "champion": bundle["champion_name"],
+            "tie_breaking_guardrail": "lower_std_then_bal_acc_then_simpler_model",
         },
         "nested_cv_subject": nested_metrics,
         "holdout_subject": test_metrics,
+        "holdout_sample_size": int(test_frame["subject_id"].nunique()),
+        "holdout_sample_caveat": (
+            "Based on only 8 unseen subjects (6 PD, 2 control); high sampling variance. "
+            "Nested CV is the primary indication of expected generalization."
+        ),
         "calibration": {
             "method": "sigmoid",
             "aggregation": aggregation,
@@ -419,6 +476,7 @@ def train(data_path: str | Path, artifact_dir: str | Path = "artifacts") -> pd.D
         "reproducibility": {
             "random_state": RANDOM_STATE,
             "data_sha256": data_hash,
+            "git_commit_sha": git_sha,
             "sklearn_version": sklearn.__version__,
         },
     }

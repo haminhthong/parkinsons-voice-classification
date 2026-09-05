@@ -93,14 +93,14 @@ def create_portfolio_figures(
         decision_threshold,
         color="#222222",
         linestyle="--",
-        label=f"Ngưỡng OOF = {decision_threshold:.3f}",
+        label=f"Ngưỡng sàng lọc OOF = {decision_threshold:.3f}",
     )
     axis.set(
         ylim=(0, 1),
         xlabel="Bệnh nhân holdout",
-        ylabel="Xác suất status = 1",
+        ylabel="Điểm sàng lọc nguy cơ (status = 1)",
     )
-    axis.set_title("Xác suất holdout theo bệnh nhân")
+    axis.set_title("Phân bố điểm sàng lọc Holdout theo bệnh nhân (8 đối tượng)")
     axis.tick_params(axis="x", rotation=35)
     legend_items = [
         Line2D(
@@ -126,7 +126,7 @@ def create_portfolio_figures(
             [0],
             color="#222222",
             linestyle="--",
-            label=f"Ngưỡng OOF = {decision_threshold:.3f}",
+            label=f"Ngưỡng sàng lọc OOF = {decision_threshold:.3f}",
         ),
     ]
     axis.legend(handles=legend_items)
@@ -143,7 +143,7 @@ def create_portfolio_figures(
         color="#4c78a8",
     )
     axis.set(xlim=(0, 1), xlabel="Tỷ lệ fold lựa chọn")
-    axis.set_title("Độ ổn định khi chọn đặc trưng")
+    axis.set_title("Độ ổn định khi chọn đặc trưng (Uncertainty, không phải nhân quả sinh học)")
     axis.grid(axis="x", alpha=0.25)
     paths.append(output_dir / "feature_selection_stability.png")
     _save_figure(figure, paths[-1])
@@ -161,7 +161,7 @@ def create_portfolio_figures(
         decision_threshold,
         color="#222222",
         linestyle="--",
-        label="Ngưỡng được chọn",
+        label="Ngưỡng sàng lọc tối ưu OOF",
     )
     axis.set(
         xlim=(0, 1),
@@ -169,7 +169,7 @@ def create_portfolio_figures(
         xlabel="Threshold",
         ylabel="Balanced Accuracy OOF",
     )
-    axis.set_title("So sánh threshold và cách gộp xác suất")
+    axis.set_title("So sánh threshold và cách gộp xác suất trên OOF Train")
     axis.legend()
     axis.grid(alpha=0.25)
     paths.append(output_dir / "threshold_aggregation.png")

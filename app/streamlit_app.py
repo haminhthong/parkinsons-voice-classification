@@ -18,18 +18,19 @@ from src.predict import load_bundle, predict_records
 
 # Cấu hình giao diện trang web Streamlit
 st.set_page_config(
-    page_title="Parkinson Voice Research Demo",
+    page_title="Parkinson Voice Feature Screening Demo",
     page_icon="🎙️",
     layout="wide",
 )
 
-st.title("🎙️ Phân loại Giọng nói Parkinson (Leakage-Aware)")
-st.warning(f"⚠️ {RESEARCH_WARNING} Mô hình không phải thiết bị y tế.")
+st.title("🎙️ Sàng lọc Đặc trưng Giọng nói Parkinson (Research Prototype)")
+st.warning(f"⚠️ {RESEARCH_WARNING} Mô hình là nguyên mẫu nghiên cứu, không phải thiết bị y tế hay chẩn đoán lâm sàng.")
 
 st.markdown(
     "Tải lên tệp CSV chứa cột `name` và 22 đặc trưng tần số/biên độ giọng nói từ bộ dữ liệu UCI. "
-    "Mô hình thực hiện dự đoán từng bản ghi âm, sau đó **gộp xác suất theo cấp độ bệnh nhân** "
-    "dựa trên quy tắc đã được tối ưu hóa hoàn toàn từ Out-Of-Fold (OOF) Train."
+    "**Lưu ý:** Hệ thống nhận bảng đặc trưng âm học số, **không nhận audio thô (WAV/MP3)**. "
+    "Mô hình dự đoán từng bản ghi âm, sau đó **gộp xác suất theo cấp độ bệnh nhân** "
+    "kèm kiểm tra Out-of-Distribution (OOD dải P1-P99) và chính sách số lượng bản ghi tối thiểu."
 )
 
 
@@ -54,17 +55,22 @@ if uploaded_file is not None:
     st.caption(
         " Quy tắc gộp xác suất được khóa từ OOF Train: "
         f"Phương pháp gộp `{bundle.get('probability_aggregation', 'mean')}`, "
-        f"Ngưỡng phân loại `{float(bundle['decision_threshold']):.3f}`."
+        f"Ngưỡng sàng lọc `{float(bundle['decision_threshold']):.3f}`."
     )
 
-    st.subheader("📊 Kết quả tổng hợp theo Bệnh nhân (Subject-Level)")
+    st.subheader("📊 Kết quả Sàng lọc theo Bệnh nhân (Subject-Level)")
     st.dataframe(
-        subject_results.style.format({"probability_status_1": "{:.1%}"}),
+        subject_results.style.format(
+            {
+                "probability_status_1": "{:.1%}",
+                "screening_score": "{:.1%}",
+            }
+        ),
         use_container_width=True,
     )
 
-    chart_frame = subject_results.set_index("subject_id")[["probability_status_1"]]
-    st.bar_chart(chart_frame, y_label="Xác suất mắc bệnh (status = 1)", horizontal=False)
+    chart_frame = subject_results.set_index("subject_id")[["screening_score"]]
+    st.bar_chart(chart_frame, y_label="Điểm sàng lọc nguy cơ (screening_score)", horizontal=False)
 
     st.subheader("📝 Kết quả chi tiết từng Bản ghi âm (Record-Level)")
     st.dataframe(

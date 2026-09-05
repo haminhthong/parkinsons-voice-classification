@@ -130,12 +130,18 @@ def calculate_metrics(y_true, y_pred, y_score) -> dict[str, float]:
 
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
 
+    precision = precision_score(y_true, y_pred, zero_division=0)
+    recall = recall_score(y_true, y_pred, zero_division=0)
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    npv = tn / (tn + fn) if (tn + fn) > 0 else 0.0
+
     metrics = {
         "Accuracy": accuracy_score(y_true, y_pred),
         "Balanced Accuracy": balanced_accuracy_score(y_true, y_pred),
-        "Precision": precision_score(y_true, y_pred, zero_division=0),
-        "Recall/Sensitivity": recall_score(y_true, y_pred, zero_division=0),
-        "Specificity": tn / (tn + fp) if (tn + fp) > 0 else 0.0,
+        "Precision": precision,
+        "Recall/Sensitivity": recall,
+        "Specificity": specificity,
+        "NPV": npv,
         "F1-macro": f1_score(y_true, y_pred, average="macro", zero_division=0),
         "ROC-AUC": roc_auc_score(y_true, y_score),
     }
@@ -146,6 +152,30 @@ def calculate_metrics(y_true, y_pred, y_score) -> dict[str, float]:
         metrics["Brier score"] = np.nan
 
     return metrics
+
+
+def calculate_clinical_likelihood_ratios(
+    sensitivity: float,
+    specificity: float,
+) -> dict[str, float | None]:
+    """Tính toán tỷ số khả dĩ dương và âm (Likelihood Ratios: LR+, LR-) cho phân tích khám phá.
+
+    LR+ = Sensitivity / (1 - Specificity)
+    LR- = (1 - Sensitivity) / Specificity
+
+    Lưu ý: Chỉ dùng cho mục đích báo cáo khám phá trong nghiên cứu sàng lọc,
+    không dùng để suy diễn chẩn đoán lâm sàng độc lập.
+
+    Args:
+        sensitivity: Độ nhạy (Recall/Sensitivity) trong khoảng [0, 1].
+        specificity: Độ đặc hiệu (Specificity) trong khoảng [0, 1].
+
+    Returns:
+        dict[str, float | None]: Tỷ số khả dĩ LR+ và LR- (hoặc None nếu chia cho 0).
+    """
+    lr_pos = (sensitivity / (1.0 - specificity)) if specificity < 1.0 else None
+    lr_neg = ((1.0 - sensitivity) / specificity) if specificity > 0.0 else None
+    return {"LR+": lr_pos, "LR-": lr_neg}
 
 
 
@@ -267,6 +297,11 @@ def expected_calibration_error(y_true, probabilities, *, n_bins: int = 5) -> flo
 
     ECE đo lường khoảng cách giữa xác suất dự đoán của mô hình và tần suất thực tế của lớp dương.
     Giá trị ECE càng gần 0 thể hiện xác suất xuất ra càng có độ tin cậy thực tế cao.
+
+    Lưu ý quan trọng về cỡ mẫu:
+    - Trên tập kiểm thử nhỏ (ví dụ 8 bệnh nhân chia 5 bin), ECE chỉ mang tính mô tả (descriptive only)
+      vì mỗi bin có quá ít hoặc không có quan sát.
+    - Đánh giá chất lượng calibration thực chất nên dựa chủ yếu vào OOF train hoặc nested CV folds.
 
     Args:
         y_true: Nhãn thực tế (0 hoặc 1).

@@ -62,3 +62,12 @@ def test_select_champion_returns_top_deployable_model(frame):
     champion = select_champion(train_frame, folds, specs)
     assert champion.name == "Logistic Regression"
     assert isinstance(champion.estimator, Pipeline)
+
+
+def test_model_complexity_ranks_simpler_models_lower():
+    from src.model_selection import _model_complexity_rank
+
+    assert _model_complexity_rank("Dummy") < _model_complexity_rank("Logistic Regression")
+    assert _model_complexity_rank("Logistic Regression") < _model_complexity_rank("KNN")
+    assert _model_complexity_rank("KNN") < _model_complexity_rank("Random Forest")
+    assert _model_complexity_rank("Random Forest") < _model_complexity_rank("HistGradientBoosting")

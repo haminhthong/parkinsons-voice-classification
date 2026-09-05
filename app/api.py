@@ -1,9 +1,11 @@
-"""Ứng dụng REST API FastAPI cho dịch vụ phân loại giọng nói Parkinson.
+"""Ứng dụng REST API FastAPI cho dịch vụ sàng lọc đặc trưng giọng nói Parkinson.
 
-Cung cấp 2 endpoint chính:
+Cung cấp các endpoint:
 - GET `/health`: Kiểm tra trạng thái hoạt động của dịch vụ API.
-- POST `/predict`: Tiếp nhận tệp dữ liệu CSV giọng nói, thực hiện suy luận
-  qua mô hình Calibrated Pipeline và trả về kết quả dự đoán chi tiết.
+- POST `/predict`: Tiếp nhận tệp dữ liệu CSV chứa 22 đặc trưng âm học, thực hiện suy luận
+  qua mô hình Calibrated Pipeline và trả về kết quả sàng lọc chi tiết kèm kiểm tra độ tin cậy.
+- POST `/predict/subject`: Tiếp nhận cấu trúc JSON cho một bệnh nhân gồm nhiều bản ghi âm,
+  trả về điểm số sàng lọc, cờ cảnh báo OOD và độ tin cậy (cấm truyền nhãn status).
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from contextlib import asynccontextmanager
 
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from app.settings import (
@@ -23,9 +26,26 @@ from app.settings import (
     MAX_UPLOAD_BYTES,
     RESEARCH_WARNING,
 )
-from src.predict import load_bundle, predict_records
+from src.predict import load_bundle, predict_records, predict_subject_records
 
 logger = logging.getLogger(__name__)
+
+
+class SubjectInferenceRequest(BaseModel):
+    """Schema yêu cầu suy luận theo cấp bệnh nhân (chặn nhận nhãn huấn luyện)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    subject_id: str = Field(
+        ...,
+        min_length=1,
+        description="Định danh bệnh nhân / đối tượng khảo sát.",
+    )
+    recordings: list[dict[str, float]] = Field(
+        ...,
+        min_length=1,
+        description="Danh sách các bản ghi âm, mỗi bản ghi chứa các đặc trưng âm học đã trích xuất.",
+    )
 
 
 @asynccontextmanager
@@ -40,9 +60,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Parkinson Voice Research API",
-    description="API phân loại giọng nói Parkinson chống rò rỉ dữ liệu (Research Only)",
-    version="1.1.0",
+    title="Parkinson Voice Feature Screening API",
+    description=(
+        "API sàng lọc đặc trưng âm học giọng nói Parkinson chống rò rỉ dữ liệu "
+        "(Research Screening Prototype). "
+        "Lưu ý: Chỉ nhận bảng 22 đặc trưng âm học đã trích xuất sẵn (CSV/JSON), "
+        "KHÔNG nhận file âm thanh thô WAV/MP3. Không dùng cho mục đích chẩn đoán y tế."
+    ),
+    version="1.2.0",
     lifespan=lifespan,
 )
 
@@ -130,4 +155,57 @@ async def predict(
         "decision_threshold": float(bundle["decision_threshold"]),
         "records": records.to_dict(orient="records"),
         "subjects": subjects.to_dict(orient="records"),
+    }
+
+
+@app.post("/predict/subject")
+async def predict_subject(
+    request: Request,
+    payload: SubjectInferenceRequest,
+) -> dict:
+    """Endpoint suy luận sàng lọc cho một đối tượng từ cấu trúc JSON gồm nhiều bản ghi.
+
+    Đầu vào: subject_id và danh sách recordings chứa 20 hoặc 22 đặc trưng âm học.
+    Nghiêm cấm: Truyền trường nhãn 'status' hoặc các cột train-only (trả về mã 422).
+    """
+    for idx, recording in enumerate(payload.recordings):
+        if "status" in recording:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Bản ghi thứ {idx + 1} chứa nhãn 'status'. Endpoint suy luận không nhận nhãn huấn luyện.",
+            )
+
+    bundle = getattr(request.app.state, "model_bundle", None)
+    if bundle is None:
+        if ARTIFACT_PATH.is_file():
+            bundle = load_bundle(ARTIFACT_PATH)
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Không tìm thấy mô hình suy luận trên hệ thống.",
+            )
+
+    try:
+        result = await run_in_threadpool(
+            predict_subject_records,
+            payload.subject_id,
+            payload.recordings,
+            bundle,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        logger.exception("Lỗi suy luận cấp bệnh nhân ngoài dự kiến")
+        raise HTTPException(
+            status_code=500,
+            detail="Dịch vụ không thể xử lý yêu cầu.",
+        ) from exc
+
+    return {
+        "warning": RESEARCH_WARNING,
+        "model": bundle["champion_name"],
+        **result,
     }
